@@ -24,6 +24,7 @@ export class Hunter {
     this.handleMints = new Map();
     this.cache = new Map();
     this.llmCalls = [];
+    this.xCalls = [];
     this.xBlockedUntil = 0;
     this.source = cfg.simulate ? 'simulated X' : cfg.xBearer ? 'X API' : cfg.anthropicKey ? 'Claude searching X' : 'pump.fun social links';
   }
@@ -68,13 +69,19 @@ export class Hunter {
     return this.llmCalls.length < this.cfg.hunterLlmPerHour;
   }
 
+  xBudgetOk() {
+    const hour = Date.now() - 3600_000;
+    this.xCalls = this.xCalls.filter((t) => t > hour);
+    return this.xCalls.length < this.cfg.xChecksPerHour;
+  }
+
   async deep(t) {
     const q = this.quick(t);
     if (this.cache.has(t.mint)) return this.merge(q, this.cache.get(t.mint));
     let x = null;
     try {
       if (this.cfg.simulate) x = this.simX(t);
-      else if (this.cfg.xBearer && Date.now() > this.xBlockedUntil) x = await this.xSearch(t);
+      else if (this.cfg.xBearer && Date.now() > this.xBlockedUntil && this.xBudgetOk()) x = await this.xSearch(t);
       else if (this.cfg.anthropicKey && this.budgetOk()) x = await this.llmSearch(t);
     } catch (e) { this.log('hunter X check failed:', e.message); }
     if (!x) return q;
@@ -100,11 +107,12 @@ export class Hunter {
   }
 
   async xSearch(t) {
+    this.xCalls.push(Date.now());
     const sym = t.symbol.replace(/[^A-Za-z0-9_]/g, '');
     const parts = [`"${t.mint}"`];
     if (sym.length >= 2) parts.push(`"$${sym}"`);
     const query = `(${parts.join(' OR ')}) -is:retweet`;
-    const url = `https://api.x.com/2/tweets/search/recent?query=${encodeURIComponent(query)}&max_results=25&tweet.fields=public_metrics&expansions=author_id&user.fields=public_metrics,username`;
+    const url = `https://api.x.com/2/tweets/search/recent?query=${encodeURIComponent(query)}&max_results=10&tweet.fields=public_metrics&expansions=author_id&user.fields=public_metrics,username`;
     const r = await fetch(url, { headers: { Authorization: `Bearer ${this.cfg.xBearer}` }, signal: AbortSignal.timeout(8000) });
     if (r.status === 429) { this.xBlockedUntil = Date.now() + 15 * 60_000; this.log('X API rate limit hit, pausing X checks for 15 minutes'); return null; }
     if (!r.ok) { this.log('X API error', r.status); return null; }

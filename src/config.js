@@ -22,7 +22,8 @@ const cfg = {
   xBearer: env.X_BEARER_TOKEN || '',
   anthropicKey: env.ANTHROPIC_API_KEY || '',
   anthropicModel: env.ANTHROPIC_MODEL || 'claude-haiku-5-5',
-  hunterLlmPerHour: num('HUNTER_LLM_PER_HOUR', 12),
+  hunterLlmPerHour: num('HUNTER_LLM_PER_HOUR', 4),
+  xChecksPerHour: num('X_CHECKS_PER_HOUR', 6),
 
   password: env.DASHBOARD_PASSWORD || '',
 

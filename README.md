@@ -36,8 +36,8 @@ Without this, the bot forgets its trades and learning every time Railway restart
 In the service, open **Variables** and add:
 - `DASHBOARD_PASSWORD` = a password you choose (enables the Pause / Close-all buttons)
 - Optional, for a smarter Hunter, one of:
-  - `X_BEARER_TOKEN` (X API; search needs X's paid Basic plan), or
-  - `ANTHROPIC_API_KEY` (Claude API key from console.anthropic.com; the Hunter asks Claude to search X for each coin the Scout likes, capped by `HUNTER_LLM_PER_HOUR`, default 12/hour)
+  - `X_BEARER_TOKEN` (X API, pay-per-use, about $0.05 per check, capped by `X_CHECKS_PER_HOUR`, default 6/hour), or
+  - `ANTHROPIC_API_KEY` (Claude API key from console.anthropic.com; the Hunter asks Claude to search X for each coin the Scout likes, capped by `HUNTER_LLM_PER_HOUR`, default 4/hour, roughly $0.05 per check)
 
 All other settings are listed in `.env.example`.
 
