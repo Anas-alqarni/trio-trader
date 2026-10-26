@@ -1,0 +1,13 @@
+{
+  "name": "trio-trader",
+  "version": "1.0.0",
+  "description": "Three-agent meme coin trading bot for pump.fun (Scout, Hunter, Professor) with a live dashboard. Paper trading by default.",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "sim": "SIMULATE=true node src/index.js"
+  },
+  "engines": { "node": ">=22" },
+  "license": "MIT"
+}
