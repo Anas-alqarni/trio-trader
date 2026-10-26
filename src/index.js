@@ -65,7 +65,8 @@ async function dexPrice(mint) {
   return pair ? +pair.priceNative : null;
 }
 
-const feed = cfg.simulate ? new SimFeed(cfg) : new PumpPortalFeed(log);
+cfg.solUsd = () => sol.usd;
+const feed = cfg.simulate ? new SimFeed(cfg) : new PumpPortalFeed(log, cfg);
 const ledger = createStore(cfg.dataDir, `ledger-${cfg.mode}.json`, ledgerDefaults(cfg));
 const brain = createStore(cfg.dataDir, `brain-${cfg.simulate ? 'sim' : 'real'}.json`, brainDefaults());
 const broker = cfg.live ? new LiveBroker(cfg, log) : new PaperBroker();
@@ -74,6 +75,7 @@ const engine = new Engine({ metaStats, cfg, feed, market: new Market(), hunter, 
 
 log(`Trio Trader starting in ${cfg.mode.toUpperCase()} mode`);
 log(`Hunter reads X using: ${hunter.source}`);
+log(`Trade data from: ${feed.poller ? 'DexScreener (free)' : cfg.simulate ? 'simulator' : 'PumpPortal (paid per message)'}`);
 if (cfg.live && !cfg.pumpPortalKey) log('LIVE_TRADING is on but PUMPPORTAL_API_KEY is missing: no trades will be placed.');
 if (cfg.live) log(`REAL MONEY: ${cfg.tradeSizeSol} SOL per trade, max ${cfg.maxOpen} open, daily loss limit ${cfg.dailyLossLimitSol} SOL`);
 if (!cfg.password) log('Tip: set DASHBOARD_PASSWORD to enable the pause / close buttons.');
@@ -81,7 +83,7 @@ if (!cfg.password) log('Tip: set DASHBOARD_PASSWORD to enable the pause / close 
 engine.start();
 setInterval(() => {
   const c = engine.L.counters, nb = c.notBuy || {};
-  log(`status: ${c.seen} coins seen, ${c.evaluated} checks, ${c.deals} deals, ${engine.L.positions.length} open | said no: scout ${nb.scout || 0}, hunter ${nb.hunter || 0}, professor ${nb.professor || 0} | coin links loaded ${metaStats.ok}, failed ${metaStats.failed} | brain learned from ${engine.learner.n}`);
+  log(`status: ${c.seen} coins seen, ${c.evaluated} checks, ${c.deals} deals, ${engine.L.positions.length} open | said no: scout ${nb.scout || 0}, hunter ${nb.hunter || 0}, professor ${nb.professor || 0} | coin links loaded ${metaStats.ok}, failed ${metaStats.failed} | brain learned from ${engine.learner.n}${feed.poller ? ` | DexScreener calls ${feed.poller.stats.calls}, coins found ${feed.poller.stats.found}, errors ${feed.poller.stats.errors}` : ''}`);
 }, 10 * 60_000);
 feed.start();
 if (!cfg.simulate) { refreshSol(); setInterval(refreshSol, 5 * 60_000); }

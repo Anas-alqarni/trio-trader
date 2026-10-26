@@ -44,6 +44,20 @@ export class Market {
     const t = this.tokens.get(m.mint);
     if (!t) return null;
     const side = m.txType, sol = +m.solAmount || 0, tok = +m.tokenAmount || 0, who = m.traderPublicKey || '';
+    if (m.synthetic) {
+      // Aggregated counts from DexScreener: no wallet detail.
+      const n = Math.max(0, m.count | 0);
+      if (n) {
+        t.trades += n; t.lastTradeAt = now;
+        if (side === 'buy') { t.buys += n; t.buySol += sol; t.synthBuyers = (t.synthBuyers || 0) + n; }
+        else { t.sells += n; t.sellSol += sol; }
+        // A coin's first DexScreener answer holds its whole history: date it mid-life, not 'just now'.
+        t.recent.push({ t: m.first ? Math.round((t.createdAt + now) / 2) : now, side, sol });
+        if (t.recent.length > 400) t.recent.splice(0, t.recent.length - 400);
+      }
+      this.reprice(t, m);
+      return t;
+    }
     t.trades++; t.lastTradeAt = now;
     if (side === 'buy') {
       t.buys++; t.buySol += sol;
@@ -55,16 +69,20 @@ export class Market {
     const prev = t.balances.get(who) || 0;
     const nb = m.newTokenBalance !== undefined ? +m.newTokenBalance : Math.max(0, prev + (side === 'buy' ? tok : -tok));
     if (nb > 0) t.balances.set(who, nb); else t.balances.delete(who);
+    this.reprice(t, m);
+    t.recent.push({ t: now, side, sol });
+    if (t.recent.length > 400) t.recent.splice(0, t.recent.length - 400);
+    return t;
+  }
+
+  reprice(t, m) {
     if (m.vSolInBondingCurve && m.vTokensInBondingCurve) {
       t.vSol = +m.vSolInBondingCurve; t.vTok = +m.vTokensInBondingCurve; t.price = t.vSol / t.vTok;
     } else if (m.marketCapSol) {
       t.price = +m.marketCapSol / TOTAL_SUPPLY;
     }
-    if (m.marketCapSol) t.mcapSol = +m.marketCapSol; else t.mcapSol = t.price * TOTAL_SUPPLY;
+    t.mcapSol = m.marketCapSol ? +m.marketCapSol : t.price * TOTAL_SUPPLY;
     if (t.price > t.peak) t.peak = t.price;
-    t.recent.push({ t: now, side, sol });
-    if (t.recent.length > 400) t.recent.splice(0, t.recent.length - 400);
-    return t;
   }
 
   features(t, now) {
@@ -80,7 +98,7 @@ export class Market {
     for (const [w, b] of t.balances) if (w !== t.creator && b > top) top = b;
     return {
       age,
-      buyers: t.buyers.size, sellers: t.sellers.size, buys: t.buys, sells: t.sells,
+      buyers: t.buyers.size + (t.synthBuyers || 0), sellers: t.sellers.size, buys: t.buys, sells: t.sells,
       ratio: t.buys / (t.sells + 1),
       netFlow: t.buySol - t.sellSol,
       buyVel: b30, vel: b30 - s30, accel: (b30 - s30) - (bp - sp),

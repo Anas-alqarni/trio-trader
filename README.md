@@ -56,6 +56,11 @@ To check what it's doing: **Deployments → View logs** shows every deal, exit a
 
 Cost: the Starter plan is about $7/month plus about $0.25/month for the disk. Don't use the free plan: it sleeps after 15 minutes without visitors, and the bot would stop watching coins.
 
+## Where the data comes from
+- **New coins:** PumpPortal's free live feed.
+- **Buys, sells and prices for each coin:** DexScreener's free API, checked every few seconds. This can't see individual wallets, so "creator sold" and "one wallet holds X%" checks only work with paid data.
+- **Paid option (exact, wallet-level trades):** set `TRADE_DATA=pumpportal` and `PUMPPORTAL_API_KEY` with a PumpPortal wallet holding at least 0.02 SOL. PumpPortal charges 0.01 SOL per 10,000 trade messages, which can add up quickly when the bot watches hundreds of coins.
+
 ## How to judge it
 
 - Leave it on practice money for **at least 2–4 weeks**. Early numbers swing a lot.

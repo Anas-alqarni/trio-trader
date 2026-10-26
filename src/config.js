@@ -15,6 +15,8 @@ const cfg = {
 
   // Live trading (off by default) — PumpPortal "Lightning" trade API
   pumpPortalKey: env.PUMPPORTAL_API_KEY || '',
+  // 'dexscreener' (free, default) or 'pumpportal' (paid per message, needs PUMPPORTAL_API_KEY)
+  tradeData: (env.TRADE_DATA || 'dexscreener').toLowerCase(),
   walletPublicKey: env.WALLET_PUBLIC_KEY || '',
   solanaRpc: env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com',
 
