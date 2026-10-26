@@ -369,6 +369,7 @@ footer{color:var(--muted);font-size:.82rem;max-width:80ch}
       <div class="legend"><span><i style="background:var(--prof)"></i>Right calls, last 100 coins</span><span><i style="background:var(--muted)"></i>Coin flip (50%)</span></div>
       <div class="factors" id="factors"><p class="hint">After 30 finished coins, this shows what the brain has learned matters most.</p></div>
       <div class="bars" id="bars"></div>
+      <p class="hint" id="whyNot"></p>
     </div>
   </section>
 
@@ -579,6 +580,13 @@ function renderLearning() {
   }
   const th = AG.map((a) => `<span class="bar-chip" style="color:var(--${a === 'professor' ? 'prof' : a})">${NAME[a]} bar ${S.agents[a].threshold.toFixed(2)}</span>`).join('');
   $('bars').innerHTML = th + `<span class="bar-chip">${L.watching} coins being followed to learn</span>`;
+  const nb = S.counters.notBuy, ev = S.counters.evaluated;
+  if (nb && ev) {
+    const share = (n) => Math.round((n / ev) * 100) + '%';
+    const meta = S.meta && (S.meta.ok + S.meta.failed) ? ` Coin links loaded for ${Math.round(S.meta.ok / (S.meta.ok + S.meta.failed) * 100)}% of coins.` : '';
+    $('whyNot').innerHTML = `<b>Why no deal yet:</b> of ${ev.toLocaleString()} checks, Scout said no ${share(nb.scout)}, Hunter ${share(nb.hunter)}, Professor ${share(nb.professor)}.` +
+      (S.counters.onlyHunter ? ` ${S.counters.onlyHunter} coins were blocked only by the Hunter.` : '') + meta;
+  }
 }
 function renderSettings() {
   const c = S.config;

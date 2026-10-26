@@ -26,19 +26,34 @@ async function refreshSol() {
 
 // ---- coin metadata (X / Telegram / website links) ----
 const metaLimit = limiter(6);
+const GATEWAYS = ['https://ipfs.io/ipfs/', 'https://gateway.pinata.cloud/ipfs/', 'https://dweb.link/ipfs/', 'https://w3s.link/ipfs/'];
+const metaStats = { ok: 0, failed: 0 };
+async function getJson(url) {
+  const r = await fetch(url, { signal: AbortSignal.timeout(5000), headers: { accept: 'application/json' } });
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return r.json();
+}
 async function fetchMeta(t) {
   if (cfg.simulate) return feed.getMeta(t.mint);
-  if (!/^https?:\/\//.test(t.uri) || metaLimit.pending() > 150) return null;
+  if (!/^https?:\/\//.test(t.uri) || metaLimit.pending() > 200) return null;
   return metaLimit(async () => {
-    const r = await fetch(t.uri, { signal: AbortSignal.timeout(6000) });
-    if (!r.ok) return null;
-    const j = await r.json();
-    return {
-      description: String(j.description || '').slice(0, 300),
-      twitter: String(j.twitter || j.extensions?.twitter || ''),
-      telegram: String(j.telegram || j.extensions?.telegram || ''),
-      website: String(j.website || j.extensions?.website || ''),
-    };
+    // Try the coin's own link first, then other public IPFS servers holding the same file.
+    const cid = t.uri.match(/\/ipfs\/([^/?#]+)/)?.[1];
+    const urls = [t.uri, ...(cid ? GATEWAYS.map((g) => g + cid).filter((u) => u !== t.uri) : [])];
+    for (const url of urls) {
+      try {
+        const j = await getJson(url);
+        metaStats.ok++;
+        return {
+          description: String(j.description || '').slice(0, 300),
+          twitter: String(j.twitter || j.extensions?.twitter || ''),
+          telegram: String(j.telegram || j.extensions?.telegram || ''),
+          website: String(j.website || j.extensions?.website || ''),
+        };
+      } catch { /* try the next server */ }
+    }
+    metaStats.failed++;
+    return null;
   });
 }
 
@@ -55,7 +70,7 @@ const ledger = createStore(cfg.dataDir, `ledger-${cfg.mode}.json`, ledgerDefault
 const brain = createStore(cfg.dataDir, `brain-${cfg.simulate ? 'sim' : 'real'}.json`, brainDefaults());
 const broker = cfg.live ? new LiveBroker(cfg, log) : new PaperBroker();
 const hunter = new Hunter(cfg, log);
-const engine = new Engine({ cfg, feed, market: new Market(), hunter, broker, ledger, brain, sol, log, fetchMeta, dexPrice: cfg.simulate ? null : dexPrice });
+const engine = new Engine({ metaStats, cfg, feed, market: new Market(), hunter, broker, ledger, brain, sol, log, fetchMeta, dexPrice: cfg.simulate ? null : dexPrice });
 
 log(`Trio Trader starting in ${cfg.mode.toUpperCase()} mode`);
 log(`Hunter reads X using: ${hunter.source}`);
@@ -64,6 +79,10 @@ if (cfg.live) log(`REAL MONEY: ${cfg.tradeSizeSol} SOL per trade, max ${cfg.maxO
 if (!cfg.password) log('Tip: set DASHBOARD_PASSWORD to enable the pause / close buttons.');
 
 engine.start();
+setInterval(() => {
+  const c = engine.L.counters, nb = c.notBuy || {};
+  log(`status: ${c.seen} coins seen, ${c.evaluated} checks, ${c.deals} deals, ${engine.L.positions.length} open | said no: scout ${nb.scout || 0}, hunter ${nb.hunter || 0}, professor ${nb.professor || 0} | coin links loaded ${metaStats.ok}, failed ${metaStats.failed} | brain learned from ${engine.learner.n}`);
+}, 10 * 60_000);
 feed.start();
 if (!cfg.simulate) { refreshSol(); setInterval(refreshSol, 5 * 60_000); }
 startServer({ cfg, engine, log, htmlPath: path.join(here, '..', 'public', 'index.html') });

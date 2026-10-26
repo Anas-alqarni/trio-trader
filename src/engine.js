@@ -25,9 +25,10 @@ export const brainDefaults = () => ({
  * It also "shadow trades" coins it did not buy, so it learns from thousands of outcomes, not just its own trades.
  */
 export class Engine extends EventEmitter {
-  constructor({ cfg, feed, market, hunter, broker, ledger, brain, sol, log, fetchMeta, dexPrice }) {
+  constructor({ cfg, feed, market, hunter, broker, ledger, brain, sol, log, fetchMeta, dexPrice, metaStats }) {
     super();
     Object.assign(this, { cfg, feed, market, hunter, broker, ledger, brain, sol, log, fetchMeta, dexPrice });
+    this.metaStats = metaStats || null;
     this.learner = new Learner(FEATURE_NAMES.length, brain.state.learner);
     this.shadows = new Map();
     this.radar = [];
@@ -144,6 +145,11 @@ export class Engine extends EventEmitter {
       if (!pr.critical) pr.thought += ` · needs ${Math.round(th.professor * 100)}%`;
 
       const team = s.vote === 'buy' && h.vote === 'buy' && pr.vote === 'buy';
+      const nb = (this.L.counters.notBuy ||= { scout: 0, hunter: 0, professor: 0 });
+      if (s.vote !== 'buy') nb.scout++;
+      if (h.vote !== 'buy') nb.hunter++;
+      if (pr.vote !== 'buy') nb.professor++;
+      if (s.vote === 'buy' && pr.vote === 'buy' && h.vote !== 'buy') this.L.counters.onlyHunter = (this.L.counters.onlyHunter || 0) + 1;
       let decision = team ? 'buy' : 'pass', blocked = '';
       if (team) {
         blocked = this.canOpen(t);
@@ -366,6 +372,7 @@ export class Engine extends EventEmitter {
       },
       learning: { samples: this.learner.n, accuracy: this.learner.accuracy(), watching: this.shadows.size },
       counters: { ...this.L.counters, tracked: this.market.tokens.size },
+      meta: this.metaStats ? { ...this.metaStats } : null,
       config: { tradeSizeSol: this.cfg.tradeSizeSol, takeProfit: this.cfg.takeProfit, stopLoss: this.cfg.stopLoss, trailing: this.cfg.trailing, maxHoldMin: this.cfg.maxHoldMin, maxOpen: this.cfg.maxOpen, dailyLossLimitSol: this.cfg.dailyLossLimitSol },
     };
     if (full) {
