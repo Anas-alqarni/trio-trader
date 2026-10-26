@@ -48,6 +48,14 @@ To check what it's doing: **Deployments → View logs** shows every deal, exit a
 
 ---
 
+## Or put it on Render (if Railway sign-ups are closed)
+1. Go to **render.com** and sign up with GitHub.
+2. **New → Blueprint**, pick the `trio-trader` repo, and tap **Apply**. Render reads `render.yaml` and sets up the always-on service plus a 1 GB disk for the bot's memory.
+3. Type a `DASHBOARD_PASSWORD` when asked. Leave the two API keys empty if you don't have them.
+4. When the deploy finishes, open the `onrender.com` link at the top of the service page.
+
+Cost: the Starter plan is about $7/month plus about $0.25/month for the disk. Don't use the free plan: it sleeps after 15 minutes without visitors, and the bot would stop watching coins.
+
 ## How to judge it
 
 - Leave it on practice money for **at least 2–4 weeks**. Early numbers swing a lot.

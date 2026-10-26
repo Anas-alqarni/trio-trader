@@ -1,0 +1,20 @@
+# One-click deploy on Render (render.com → New → Blueprint → pick this repo)
+services:
+  - type: web
+    name: trio-trader
+    runtime: docker
+    plan: starter          # always-on (the free plan sleeps, which would stop the bot)
+    healthCheckPath: /health
+    disk:
+      name: trio-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: DATA_DIR
+        value: /data
+      - key: DASHBOARD_PASSWORD
+        sync: false        # Render asks you to type it during setup
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: X_BEARER_TOKEN
+        sync: false
