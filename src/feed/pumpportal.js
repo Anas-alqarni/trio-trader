@@ -12,7 +12,7 @@ export class PumpPortalFeed extends EventEmitter {
     // New coins are free. Per-coin trades need a funded PumpPortal key (metered), so by default
     // trades come from DexScreener's free API instead (see DexPoller below).
     this.paidTrades = cfg.tradeData === 'pumpportal' && !!cfg.pumpPortalKey;
-    this.url = 'wss://pumpportal.fun/api/data' + (this.paidTrades ? `?api-key=${encodeURIComponent(cfg.pumpPortalKey)}` : '');
+    this.url = (cfg.feedUrl || 'wss://pumpportal.fun/api/data') + (this.paidTrades ? `?api-key=${encodeURIComponent(cfg.pumpPortalKey)}` : '');
     this.poller = this.paidTrades ? null : new DexPoller(this, log, cfg);
     this.subs = new Set();
     this.pendingSub = new Set();
@@ -27,23 +27,30 @@ export class PumpPortalFeed extends EventEmitter {
     this.connect();
     if (this.poller) this.poller.start();
     setInterval(() => this.flush(), 300);
-    // Watchdog: if the stream goes silent, reconnect.
+    // Watchdog: reconnect if the stream goes silent, or if we have not been live for 45s for any reason
+    // (a connection attempt that hangs never fires "close", which used to leave the bot stuck on "connecting").
     setInterval(() => {
-      if (this.status === 'live' && Date.now() - this.lastMsgAt > 60_000) {
-        this.log('feed silent for 60s, reconnecting');
-        try { this.ws.close(); } catch { /* ignore */ }
-      }
+      const now = Date.now();
+      if (this.status === 'live' && now - this.lastMsgAt > 60_000) { this.log('feed silent for 60s, reconnecting'); this.reconnect(); }
+      else if (this.status !== 'live' && now - this.statusAt > 45_000) { this.log(`feed stuck "${this.status}" for 45s, reconnecting`); this.reconnect(true); }
     }, 15_000);
   }
 
-  setStatus(s) { this.status = s; this.emit('status', s); }
+  setStatus(s) { this.status = s; this.statusAt = Date.now(); this.emit('status', s); }
 
   connect() {
+    const gen = (this.gen = (this.gen || 0) + 1); // events from older sockets are ignored
     this.setStatus('connecting');
     let ws;
-    try { ws = new WebSocket(this.url); } catch (e) { this.log('feed error', e.message); return this.retry(); }
+    try { ws = new WebSocket(this.url); } catch (e) { this.log('feed error', e.message); return this.scheduleRetry(gen); }
     this.ws = ws;
+    clearTimeout(this.connectTimer);
+    this.connectTimer = setTimeout(() => {
+      if (gen === this.gen && this.status !== 'live') { this.log('feed connection timed out'); this.reconnect(); }
+    }, 15_000);
     ws.addEventListener('open', () => {
+      if (gen !== this.gen) return;
+      clearTimeout(this.connectTimer);
       this.backoff = 1000;
       this.lastMsgAt = Date.now();
       this.setStatus('live');
@@ -53,6 +60,7 @@ export class PumpPortalFeed extends EventEmitter {
       if (this.paidTrades && this.subs.size) this.raw({ method: 'subscribeTokenTrade', keys: [...this.subs] });
     });
     ws.addEventListener('message', (ev) => {
+      if (gen !== this.gen) return;
       this.lastMsgAt = Date.now();
       let m;
       try { m = JSON.parse(typeof ev.data === 'string' ? ev.data : Buffer.from(ev.data).toString()); } catch { return; }
@@ -61,14 +69,25 @@ export class PumpPortalFeed extends EventEmitter {
       else if (m.txType === 'buy' || m.txType === 'sell') this.emit('trade', m);
       else if (m.txType === 'migrate' || (m.mint && !m.txType && m.pool)) this.emit('migrate', m);
     });
-    ws.addEventListener('close', () => this.retry());
-    ws.addEventListener('error', () => { try { ws.close(); } catch { /* ignore */ } });
+    ws.addEventListener('close', (ev) => { if (gen === this.gen) { this.log(`feed closed (code ${ev.code})`); this.scheduleRetry(gen); } });
+    ws.addEventListener('error', () => { if (gen === this.gen) { try { ws.close(); } catch { /* ignore */ } this.scheduleRetry(gen); } });
   }
 
-  retry() {
-    if (this.status === 'reconnecting') return;
+  /** Drop the current socket and start a fresh one right away (or after the backoff). */
+  reconnect(withBackoff = false) {
+    const old = this.ws;
+    this.gen = (this.gen || 0) + 1; // detach the old socket's events
+    try { old?.close(); } catch { /* ignore */ }
+    clearTimeout(this.retryTimer);
+    if (withBackoff) this.scheduleRetry(this.gen); else this.connect();
+  }
+
+  scheduleRetry(gen) {
+    if (gen !== this.gen || this.retryTimer && this.retryPending) return;
     this.setStatus('reconnecting');
-    setTimeout(() => { this.status = 'connecting'; this.connect(); }, this.backoff);
+    this.retryPending = true;
+    clearTimeout(this.retryTimer);
+    this.retryTimer = setTimeout(() => { this.retryPending = false; this.connect(); }, this.backoff);
     this.backoff = Math.min(this.backoff * 2, 30_000);
   }
 
