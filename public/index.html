@@ -200,7 +200,10 @@ tr.fresh{animation:fresh 1.2s ease}
 .mini{display:inline-flex;gap:3px}
 .mini i{width:16px;height:16px;border-radius:50%;display:inline-grid;place-items:center;font:700 .6rem var(--mono);font-style:normal;border:1.5px solid var(--line);color:var(--muted)}
 .mini i.buy{border-color:var(--gain);color:var(--gain)} .mini i.avoid{border-color:var(--loss);color:var(--loss)} .mini i.wait{border-color:color-mix(in srgb,var(--warn) 60%,transparent);color:var(--warn)}
-.res{font-weight:600} .res.bought{color:var(--gain)} .res.blocked{color:var(--warn)}
+.res{font-weight:600} .res.bought{color:var(--gain)} .res.blocked{color:var(--warn)} .res.vetoed{color:var(--prof)}
+.coach{display:grid;gap:6px;padding:12px 14px;border-radius:12px;border:1px solid color-mix(in srgb,var(--prof) 45%,transparent);background:color-mix(in srgb,var(--prof) 8%,transparent);font-size:.88rem}
+.coach b{font-family:var(--display)}
+.coach small{color:var(--muted)}
 
 .settings{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px}
 .setting{background:var(--panel-2);border-radius:10px;padding:8px 10px}
@@ -511,6 +514,7 @@ function verdictText(item) {
   if (item.decision === 'bought') return 'All three agree → bought.';
   if (item.decision === 'blocked') return `All three agree, but no trade: ${item.blocked}.`;
   if (item.decision === 'failed') return 'All three agree, but the trade failed.';
+  if (item.decision === 'vetoed') return `All three agree, but ${item.blocked}. No trade.`;
   const no = AG.filter((a) => item.votes[a] !== 'buy').map((a) => `${NAME[a]} says ${item.votes[a] === 'avoid' ? 'no' : 'wait'}`);
   return `No deal: ${no.join(', ')}.`;
 }
@@ -588,7 +592,7 @@ function renderPositions(flashId) {
 function renderRadar(freshMint) {
   if (!radarItems.length) return;
   $('radar').innerHTML = radarItems.slice(0, 14).map((r) => {
-    const res = r.decision === 'bought' ? 'Bought' : r.decision === 'blocked' ? 'Agreed (blocked)' : r.decision === 'failed' ? 'Trade failed' : 'Passed';
+    const res = r.decision === 'bought' ? 'Bought' : r.decision === 'blocked' ? 'Agreed (blocked)' : r.decision === 'vetoed' ? 'Claude vetoed' : r.decision === 'failed' ? 'Trade failed' : 'Passed';
     return `<tr class="${r.mint === freshMint ? 'fresh' : ''}"><td><b>$${esc(r.symbol)}</b></td><td class="num">${r.age}s</td><td class="num">${usd(r.mcapUsd)}</td>
       <td><span class="mini">${AG.map((a) => `<i class="${r.votes[a]}" title="${NAME[a]}: ${VOTE_TXT[r.votes[a]]}">${a[0].toUpperCase()}</i>`).join('')}</span></td>
       <td class="res ${r.decision}">${res}</td></tr>`;
@@ -650,6 +654,15 @@ function renderAnalysis() {
   rows.push(t ? `<div class="tune-row"><span>Last tuning on ${t.paths} coins: best rule ${t.accepted ? 'adopted' : 'not better on newest coins, kept current'}</span><b>${pct(t.testAvg)} vs ${pct(t.currentTestAvg)}</b></div>` : `<div class="tune-row"><span>Sell-rule tuning starts after 90 recorded coins</span><b>${A.paths} so far</b></div>`);
   rows.push(wf.ready ? `<div class="tune-row"><span>Brain on newer vs older coins</span><b>${pctPlain(wf.newer)} vs ${pctPlain(wf.older)} · ${wf.trend}</b></div>` : `<div class="tune-row"><span>Walk-forward check needs 80 finished coins</span><b>${wf.have} so far</b></div>`);
   rows.push(A.alerts ? '<div class="tune-row"><span>WhatsApp alerts</span><b>on</b></div>' : '<div class="tune-row"><span>WhatsApp alerts</span><b>off: add WHATSAPP_PHONE and WHATSAPP_APIKEY</b></div>');
+  const C = A.claude;
+  if (!C) rows.push('<div class="tune-row"><span>Claude risk check and coach</span><b>off: add ANTHROPIC_API_KEY</b></div>');
+  else {
+    const rec = C.record, vAcc = rec.vetoes ? Math.round(rec.vetoRight / rec.vetoes * 100) + '% of vetoed coins lost' : 'no vetoes checked yet';
+    rows.push(`<div class="tune-row"><span>Claude risk check ${C.riskCheck ? 'on' : 'off'}: ${C.stats.riskCalls} checks</span><b>${rec.vetoes} vetoes · ${vAcc}</b></div>`);
+    const co = C.coach;
+    rows.push(co ? `<div class="coach"><b>Claude coach · ${new Date(co.at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</b><span>${esc(co.summary)}</span>${Object.keys(co.applied).length ? `<small>Changed: ${Object.entries(co.applied).map(([k, v]) => `${k} bar ${v.from} → ${v.to}`).join(', ')}</small>` : ''}${Object.keys(co.rejected).length ? `<small>Not applied: ${Object.entries(co.rejected).map(([k, v]) => `${k} (${esc(v)})`).join(', ')}</small>` : ''}</div>`
+      : `<div class="tune-row"><span>Claude coach ${C.coachOn ? 'on' : 'off'}: first review after ${C.labelsUntilCoach} more finished coins</span><b>then every 12h</b></div>`);
+  }
   $('tune').innerHTML = rows.join('');
   const sg = A.signals;
   if (!sg.ready) { $('sigHint').textContent = `Grading starts after ${sg.need} finished coins (${sg.have} so far). Each signal will be marked alive, reversed or dead.`; $('signals').innerHTML = ''; return; }

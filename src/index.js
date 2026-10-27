@@ -12,6 +12,7 @@ import { LiveBroker } from './broker/live.js';
 import { Engine, ledgerDefaults, brainDefaults } from './engine.js';
 import { startServer } from './server.js';
 import { Notifier } from './notify.js';
+import { ClaudeHelper } from './claude.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -73,10 +74,12 @@ const brain = createStore(cfg.dataDir, `brain-${cfg.simulate ? 'sim' : 'real'}.j
 const broker = cfg.live ? new LiveBroker(cfg, log) : new PaperBroker();
 const hunter = new Hunter(cfg, log);
 const notifier = new Notifier(cfg, log);
-const engine = new Engine({ metaStats, notifier, cfg, feed, market: new Market(), hunter, broker, ledger, brain, sol, log, fetchMeta, dexPrice: cfg.simulate ? null : dexPrice });
+const claude = new ClaudeHelper(cfg, log);
+const engine = new Engine({ metaStats, notifier, claude, cfg, feed, market: new Market(), hunter, broker, ledger, brain, sol, log, fetchMeta, dexPrice: cfg.simulate ? null : dexPrice });
 
 log(`Trio Trader starting in ${cfg.mode.toUpperCase()} mode`);
 log(`Hunter reads X using: ${hunter.source}`);
+log(claude.enabled ? `Claude on: risk check ${cfg.claudeRiskCheck ? 'on' : 'off'} (${cfg.claudeRiskModel}, max ${cfg.claudeChecksPerDay}/day), coach ${cfg.claudeCoach ? `every ${cfg.coachHours}h (${cfg.claudeCoachModel})` : 'off'}` : 'Claude off (add ANTHROPIC_API_KEY to turn on the risk check and coach)');
 log(`Trade data from: ${feed.poller ? 'DexScreener (free)' : cfg.simulate ? 'simulator' : 'PumpPortal (paid per message)'}`);
 if (cfg.live && !cfg.pumpPortalKey) log('LIVE_TRADING is on but PUMPPORTAL_API_KEY is missing: no trades will be placed.');
 if (cfg.live) log(`REAL MONEY: ${cfg.tradeSizeSol} SOL per trade, max ${cfg.maxOpen} open, daily loss limit ${cfg.dailyLossLimitSol} SOL`);

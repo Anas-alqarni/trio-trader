@@ -20,6 +20,7 @@ export const brainDefaults = () => ({
   agents: Object.fromEntries([...AGENTS, 'team'].map((a) => [a, { calls: 0, right: 0, buys: 0, buyWins: 0 }])),
   samples: [], curve: [], labels: 0,
   paths: [], exitRule: null, exitTune: null, mood: 'normal', recentY: [],
+  claude: { vetoes: 0, vetoRight: 0, passes: 0, passWins: 0 }, coach: [], coachAt: 0, coachLabelsAt: 0,
 });
 
 /**
@@ -28,11 +29,13 @@ export const brainDefaults = () => ({
  * It also "shadow trades" coins it did not buy, so it learns from thousands of outcomes, not just its own trades.
  */
 export class Engine extends EventEmitter {
-  constructor({ cfg, feed, market, hunter, broker, ledger, brain, sol, log, fetchMeta, dexPrice, metaStats, notifier }) {
+  constructor({ cfg, feed, market, hunter, broker, ledger, brain, sol, log, fetchMeta, dexPrice, metaStats, notifier, claude }) {
     super();
     Object.assign(this, { cfg, feed, market, hunter, broker, ledger, brain, sol, log, fetchMeta, dexPrice });
     this.metaStats = metaStats || null;
     this.notifier = notifier || { send() {}, enabled: false };
+    this.claude = claude || null;
+    this.coaching = false;
     this.analysisCache = null;
     for (const [k, v] of Object.entries(brainDefaults())) if (this.B[k] === undefined) this.B[k] = v;
     this.learner = new Learner(FEATURE_NAMES.length, brain.state.learner);
@@ -132,6 +135,9 @@ export class Engine extends EventEmitter {
       const t = this.market.tokens.get(s.mint);
       if (t) this.updateShadow(s, t, now); else this.resolveShadow(s, s.lastRet, 'coin dropped');
     }
+    if (this.claude?.enabled && this.cfg.claudeCoach && !this.coaching && now - (this.B.coachAt || 0) >= this.cfg.coachHours * 3600_000 && this.B.labels - (this.B.coachLabelsAt || 0) >= 30) {
+      this.runCoach().catch((e) => this.log('coach error', e.message)).finally(() => { this.coaching = false; });
+    }
     if (this.L.daily.date !== today()) {
       const y = this.L.daily;
       if (y.date) this.notifier.send(`📊 Day ${y.date}: ${y.pnl >= 0 ? '+' : ''}${y.pnl.toFixed(4)} SOL. Balance ${this.equityNow().toFixed(3)} SOL, ${this.L.trades.length} trades so far, brain accuracy ${this.learner.accuracy() == null ? '—' : Math.round(this.learner.accuracy() * 100) + '%'}.`, { important: true });
@@ -168,12 +174,22 @@ export class Engine extends EventEmitter {
       if (pr.vote !== 'buy') nb.professor++;
       if (s.vote === 'buy' && pr.vote === 'buy' && h.vote !== 'buy') this.L.counters.onlyHunter = (this.L.counters.onlyHunter || 0) + 1;
       let decision = team ? 'buy' : 'pass', blocked = '';
+      let claudeVeto = null;
       if (team) {
         blocked = this.canOpen(t);
-        if (!blocked) { const ok = await this.open(t, { s, h, pr }); decision = ok ? 'bought' : 'failed'; }
-        else decision = 'blocked';
+        if (!blocked && this.claude) {
+          const cv = await this.claude.riskCheck(t, this.market.features(t, Date.now()), { s, h, pr });
+          if (cv) {
+            claudeVeto = cv.veto;
+            if (cv.veto) { decision = 'vetoed'; blocked = `Claude: ${cv.reason}`; pr.thought = `Claude vetoed it: ${cv.reason}`; }
+          }
+        }
+        if (decision !== 'vetoed') {
+          if (!blocked) { const ok = await this.open(t, { s, h, pr }); decision = ok ? 'bought' : 'failed'; }
+          else decision = 'blocked';
+        }
       }
-      if (!t.shadowed && this.shadows.size < this.cfg.maxShadows && (f.age >= 40 || team)) this.addShadow(t, x, { s, h, pr }, team);
+      if (!t.shadowed && this.shadows.size < this.cfg.maxShadows && (f.age >= 40 || team)) this.addShadow(t, x, { s, h, pr }, team, claudeVeto);
       this.pushRadar(t, f, { s, h, pr }, decision, blocked);
     } finally {
       t.evaluating = false;
@@ -274,11 +290,11 @@ export class Engine extends EventEmitter {
   }
 
   // ---------- learning from shadow trades ----------
-  addShadow(t, x, v, team) {
+  addShadow(t, x, v, team, claudeVeto = null) {
     t.shadowed = true;
     const size = this.cfg.tradeSizeSol;
     this.shadows.set(t.mint, {
-      mint: t.mint, symbol: t.symbol, t0: Date.now(), x, team,
+      mint: t.mint, symbol: t.symbol, t0: Date.now(), x, team, claudeVeto,
       cost: size + this.cfg.priorityFeeSol, tokens: this.quoteBuy(t, size),
       peakRet: 0, lastRet: 0, creatorSoldAtEntry: t.creatorSold, path: [[0, 0]], creatorSoldSec: null,
       scores: { scout: v.s.score, hunter: v.h.score, professor: v.pr.score },
@@ -322,6 +338,10 @@ export class Engine extends EventEmitter {
       else if (v === 'avoid') { st.calls++; if (!y) st.right++; }
     }
     if (s.team) { A.team.buys++; if (y) A.team.buyWins++; }
+    if (s.claudeVeto != null) {
+      const C = this.B.claude;
+      if (s.claudeVeto) { C.vetoes++; if (!y) C.vetoRight++; } else { C.passes++; if (y) C.passWins++; }
+    }
     this.B.samples.push({ p: s.scores.professor, scout: s.scores.scout, hunter: s.scores.hunter, ret: +ret.toFixed(4), x: s.x.map((v) => +v.toFixed(3)) });
     if (this.B.samples.length > 600) this.B.samples.splice(0, this.B.samples.length - 600);
     this.B.labels++;
@@ -373,6 +393,52 @@ export class Engine extends EventEmitter {
     }
   }
 
+  /** Ask Claude to review the record; apply only small bar changes that the bot's own history confirms. */
+  async runCoach() {
+    this.coaching = true;
+    this.B.coachAt = Date.now();
+    this.B.coachLabelsAt = this.B.labels;
+    const S = this.B.samples, th = this.B.thresholds;
+    const keyOf = { scout: 'scout', hunter: 'hunter', professor: 'p' };
+    const evAt = (k, bar) => { const sel = S.filter((x) => x[keyOf[k]] >= bar); return { n: sel.length, avg_ret: sel.length ? +(sel.reduce((a, x) => a + x.ret, 0) / sel.length).toFixed(4) : null }; };
+    const barTests = {};
+    for (const k of Object.keys(keyOf)) barTests[k] = [0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8].map((b) => ({ bar: b, ...evAt(k, b) }));
+    const A = this.analysis();
+    const report = {
+      mode: this.cfg.mode, bars: th, mood: this.B.mood, sell_rule: this.rule(),
+      edge: A.edge, metrics: { ...A.metrics, byReason: A.metrics.byReason },
+      agent_accuracy: Object.fromEntries(['scout', 'hunter', 'professor'].map((a) => [a, { calls: this.B.agents[a].calls, right: this.B.agents[a].right }])),
+      team_picks: this.B.agents.team, said_no_counts: this.L.counters.notBuy || {}, coins_judged: this.L.counters.evaluated,
+      brain: { learned_from: this.learner.n, accuracy: this.learner.accuracy(), walk_forward: A.walkForward },
+      signal_health: A.signals.ready ? A.signals.signals.map((x) => ({ name: x.name, status: x.status, ic: x.ic })) : 'not ready',
+      claude_risk_check: this.B.claude, bar_tests: barTests,
+      last_trades: this.L.trades.slice(0, 15).map((t) => ({ ret: +t.ret.toFixed(3), reason: t.reason, held_s: t.holdSec })),
+    };
+    const out = await this.claude.coach(report);
+    if (!out) return;
+    const floors = { scout: 0.35, hunter: 0.2, professor: 0.45 };
+    const applied = {}, rejected = {};
+    for (const k of ['scout', 'hunter', 'professor']) {
+      const v = Number(out.bars?.[k]);
+      if (!Number.isFinite(v)) continue;
+      const cur = th[k], nv = +Math.min(0.9, Math.max(floors[k], v)).toFixed(2);
+      if (Math.abs(nv - cur) < 0.01) continue;
+      if (Math.abs(nv - cur) > 0.1001) { rejected[k] = `${nv} is too big a jump`; continue; }
+      const now = evAt(k, cur), next = evAt(k, nv);
+      if (S.length < 60 || next.n < 8) { rejected[k] = 'not enough history to confirm'; continue; }
+      if ((next.avg_ret ?? -1) < (now.avg_ret ?? -1) - 0.002) { rejected[k] = `history says worse (${next.avg_ret} vs ${now.avg_ret})`; continue; }
+      th[k] = nv; applied[k] = { from: cur, to: nv };
+    }
+    const entry = { at: Date.now(), summary: out.summary, why: out.why, applied, rejected };
+    this.B.coach.unshift(entry);
+    if (this.B.coach.length > 10) this.B.coach.length = 10;
+    this.analysisCache = null;
+    this.brain.save();
+    const ch = Object.entries(applied).map(([k, v]) => `${k} bar ${v.from}→${v.to}`).join(', ');
+    this.log(`Claude coach: ${out.summary.slice(0, 160)}${ch ? ' | applied ' + ch : ''}`);
+    this.notifier.send(`🎓 Claude coach: ${out.summary}${ch ? `\nChanged: ${ch}` : ''}`, { important: true });
+  }
+
   analysis() {
     if (this.analysisCache && Date.now() - this.analysisCache.at < 60_000) return this.analysisCache.data;
     const rets = this.L.trades.map((t) => t.ret);
@@ -388,6 +454,11 @@ export class Engine extends EventEmitter {
       paths: this.B.paths.length,
       breaker: (this.L.cooldownUntil || 0) > Date.now() ? { until: this.L.cooldownUntil, why: this.L.cooldownWhy } : null,
       alerts: this.notifier.enabled,
+      claude: this.claude?.enabled ? {
+        riskCheck: !!this.cfg.claudeRiskCheck, coachOn: !!this.cfg.claudeCoach, stats: this.claude.stats, record: this.B.claude,
+        coach: this.B.coach[0] || null, nextCoachInMin: Math.max(0, Math.round(((this.B.coachAt || 0) + this.cfg.coachHours * 3600_000 - Date.now()) / 60_000)),
+        labelsUntilCoach: Math.max(0, 30 - (this.B.labels - (this.B.coachLabelsAt || 0))),
+      } : null,
     };
     this.analysisCache = { at: Date.now(), data };
     return data;

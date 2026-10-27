@@ -20,6 +20,10 @@ A meme coin trading bot for **pump.fun** run by three agents, with a live dashbo
 - **Is it really working?** A bootstrap 95% range for the average trade result says whether profits are a real edge or could be luck. Plus profit factor, worst drop, losing streaks, and results by sell reason.
 - **Market mood:** a hot/normal/cold state with two thresholds (hysteresis) from recent coin outcomes. In a cold market the Professor's bar rises by 10 points.
 - **Circuit breaker:** no new buys for `COOLDOWN_MINUTES` (60) after `LOSS_STREAK_PAUSE` (5) losses in a row, or a `MAX_DRAWDOWN_PCT` (30%) drop from the best balance. The Resume button clears it.
+- **Claude (optional, `ANTHROPIC_API_KEY`):**
+  - *Risk check:* when all three agents vote BUY, Claude (Haiku) takes a last look at the coin's name, description, links and numbers, and can veto clear scams, copycats and impersonation. If Claude is slow or down, the trade goes ahead on the agents' vote. The bot tracks how often vetoed coins really lost. Capped by `CLAUDE_CHECKS_PER_DAY` (200).
+  - *Coach:* every `COACH_HOURS` (12), Claude (Sonnet) reviews the full record, writes a plain-English report, and may suggest moving an agent's bar. The bot applies a change only if it is at most 0.10 and its own history confirms coins above the new bar did at least as well.
+  - *Hunter reads X:* the Hunter asks Claude to search X for coins the Scout likes, capped by `HUNTER_LLM_PER_HOUR`. This uses web search and is the most expensive part (about $0.05 per check), so set it to 1 or 2 if you want to keep costs low, or 0 to turn it off.
 - **WhatsApp alerts (optional):** buys, sells, circuit breaker, mood changes, tuned sell rules and a daily summary, through CallMeBot's free personal service. Setup: add **+34 694 25 79 52** to your phone contacts, send it **I allow callmebot to send me messages** on WhatsApp, and it replies with your API key. Then set `WHATSAPP_PHONE` (your number with country code, e.g. `+9665XXXXXXXX`) and `WHATSAPP_APIKEY`. Alerts are bundled and sent at most once every 20 seconds. Set `WHATSAPP_ALERTS=important` to get only the big moments (no individual trades).
 
 ---
