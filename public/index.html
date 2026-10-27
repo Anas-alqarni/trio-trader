@@ -649,7 +649,7 @@ function renderAnalysis() {
   rows.push(`<div class="tune-row"><span>Sell rule ${A.ruleTuned ? '(tuned by the bot)' : '(your settings)'}</span><b>+${Math.round(r.takeProfit * 100)}% / -${Math.round(r.stopLoss * 100)}% / trail ${Math.round(r.trailing * 100)}% / ${r.maxHoldMin}m</b></div>`);
   rows.push(t ? `<div class="tune-row"><span>Last tuning on ${t.paths} coins: best rule ${t.accepted ? 'adopted' : 'not better on newest coins, kept current'}</span><b>${pct(t.testAvg)} vs ${pct(t.currentTestAvg)}</b></div>` : `<div class="tune-row"><span>Sell-rule tuning starts after 90 recorded coins</span><b>${A.paths} so far</b></div>`);
   rows.push(wf.ready ? `<div class="tune-row"><span>Brain on newer vs older coins</span><b>${pctPlain(wf.newer)} vs ${pctPlain(wf.older)} · ${wf.trend}</b></div>` : `<div class="tune-row"><span>Walk-forward check needs 80 finished coins</span><b>${wf.have} so far</b></div>`);
-  if (!A.telegram) rows.push('<div class="tune-row"><span>Telegram alerts</span><b>off: add TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID</b></div>');
+  rows.push(A.alerts ? '<div class="tune-row"><span>WhatsApp alerts</span><b>on</b></div>' : '<div class="tune-row"><span>WhatsApp alerts</span><b>off: add WHATSAPP_PHONE and WHATSAPP_APIKEY</b></div>');
   $('tune').innerHTML = rows.join('');
   const sg = A.signals;
   if (!sg.ready) { $('sigHint').textContent = `Grading starts after ${sg.need} finished coins (${sg.have} so far). Each signal will be marked alive, reversed or dead.`; $('signals').innerHTML = ''; return; }

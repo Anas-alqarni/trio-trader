@@ -80,7 +80,7 @@ log(`Hunter reads X using: ${hunter.source}`);
 log(`Trade data from: ${feed.poller ? 'DexScreener (free)' : cfg.simulate ? 'simulator' : 'PumpPortal (paid per message)'}`);
 if (cfg.live && !cfg.pumpPortalKey) log('LIVE_TRADING is on but PUMPPORTAL_API_KEY is missing: no trades will be placed.');
 if (cfg.live) log(`REAL MONEY: ${cfg.tradeSizeSol} SOL per trade, max ${cfg.maxOpen} open, daily loss limit ${cfg.dailyLossLimitSol} SOL`);
-if (notifier.enabled) notifier.send(`Trio Trader started in ${cfg.mode.toUpperCase()} mode.`);
+if (notifier.enabled) { notifier.send(`Started in ${cfg.mode.toUpperCase()} mode. WhatsApp alerts are on.`, { important: true }); log('WhatsApp alerts on'); }
 if (!cfg.password) log('Tip: set DASHBOARD_PASSWORD to enable the pause / close buttons.');
 
 engine.start();

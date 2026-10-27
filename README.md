@@ -20,7 +20,7 @@ A meme coin trading bot for **pump.fun** run by three agents, with a live dashbo
 - **Is it really working?** A bootstrap 95% range for the average trade result says whether profits are a real edge or could be luck. Plus profit factor, worst drop, losing streaks, and results by sell reason.
 - **Market mood:** a hot/normal/cold state with two thresholds (hysteresis) from recent coin outcomes. In a cold market the Professor's bar rises by 10 points.
 - **Circuit breaker:** no new buys for `COOLDOWN_MINUTES` (60) after `LOSS_STREAK_PAUSE` (5) losses in a row, or a `MAX_DRAWDOWN_PCT` (30%) drop from the best balance. The Resume button clears it.
-- **Telegram alerts (optional):** buys, sells, breaker, mood changes, tuned rules and a daily summary. Create a bot with @BotFather, message it once, then set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` (find the chat id at `https://api.telegram.org/bot<token>/getUpdates`).
+- **WhatsApp alerts (optional):** buys, sells, circuit breaker, mood changes, tuned sell rules and a daily summary, through CallMeBot's free personal service. Setup: add **+34 694 25 79 52** to your phone contacts, send it **I allow callmebot to send me messages** on WhatsApp, and it replies with your API key. Then set `WHATSAPP_PHONE` (your number with country code, e.g. `+9665XXXXXXXX`) and `WHATSAPP_APIKEY`. Alerts are bundled and sent at most once every 20 seconds. Set `WHATSAPP_ALERTS=important` to get only the big moments (no individual trades).
 
 ---
 

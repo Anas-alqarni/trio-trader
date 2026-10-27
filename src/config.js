@@ -59,9 +59,10 @@ const cfg = {
   maxDrawdownPct: num('MAX_DRAWDOWN_PCT', 30) / 100,
   cooldownMin: num('COOLDOWN_MINUTES', 60),
 
-  // Telegram alerts (optional)
-  telegramToken: env.TELEGRAM_BOT_TOKEN || '',
-  telegramChat: env.TELEGRAM_CHAT_ID || '',
+  // WhatsApp alerts via CallMeBot (optional)
+  whatsappPhone: env.WHATSAPP_PHONE || '',
+  whatsappKey: env.WHATSAPP_APIKEY || '',
+  whatsappLevel: (env.WHATSAPP_ALERTS || 'all').toLowerCase(), // 'all' or 'important'
 
   simSpawnMs: num('SIM_SPAWN_MS', 2500),
 };

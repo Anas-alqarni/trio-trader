@@ -134,7 +134,7 @@ export class Engine extends EventEmitter {
     }
     if (this.L.daily.date !== today()) {
       const y = this.L.daily;
-      if (y.date) this.notifier.send(`📊 Day ${y.date}: ${y.pnl >= 0 ? '+' : ''}${y.pnl.toFixed(4)} SOL. Balance ${this.equityNow().toFixed(3)} SOL, ${this.L.trades.length} trades so far, brain accuracy ${this.learner.accuracy() == null ? '—' : Math.round(this.learner.accuracy() * 100) + '%'}.`);
+      if (y.date) this.notifier.send(`📊 Day ${y.date}: ${y.pnl >= 0 ? '+' : ''}${y.pnl.toFixed(4)} SOL. Balance ${this.equityNow().toFixed(3)} SOL, ${this.L.trades.length} trades so far, brain accuracy ${this.learner.accuracy() == null ? '—' : Math.round(this.learner.accuracy() * 100) + '%'}.`, { important: true });
       this.L.daily = { date: today(), pnl: 0 };
     }
   }
@@ -211,7 +211,7 @@ export class Engine extends EventEmitter {
     this.L.counters.deals++;
     this.log(`DEAL ${this.cfg.mode.toUpperCase()} buy $${t.symbol} ${size} SOL`);
     this.emit('deal', this.publicPos(p, now));
-    this.notifier.send(`🟢 ${this.cfg.mode === 'live' ? 'REAL' : 'Practice'} buy $${t.symbol} for ${size} SOL\nScout: ${v.s.thought}\nHunter: ${v.h.thought}\nProfessor: ${v.pr.thought}\nhttps://pump.fun/coin/${t.mint}`);
+    this.notifier.send(`🟢 ${this.cfg.mode === 'live' ? 'REAL' : 'Practice'} buy $${t.symbol} for ${size} SOL\nProfessor: ${v.pr.thought}\nhttps://pump.fun/coin/${t.mint}`);
     this.ledger.save();
     return true;
   }
@@ -270,7 +270,7 @@ export class Engine extends EventEmitter {
     this.L.cooldownWhy = why;
     if (dd >= this.cfg.maxDrawdownPct) this.L.ddPeak = this.equityNow(); // measure the next drawdown from here
     this.log(`circuit breaker: ${why}, pausing buys for ${this.cfg.cooldownMin} min`);
-    this.notifier.send(`⏸ Circuit breaker: ${why}. No new buys for ${this.cfg.cooldownMin} minutes. The team keeps watching and learning.`);
+    this.notifier.send(`⏸ Circuit breaker: ${why}. No new buys for ${this.cfg.cooldownMin} minutes. The team keeps watching and learning.`, { important: true });
   }
 
   // ---------- learning from shadow trades ----------
@@ -313,7 +313,7 @@ export class Engine extends EventEmitter {
     if (this.B.recentY.length > 60) this.B.recentY.splice(0, this.B.recentY.length - 60);
     const prevMood = this.B.mood;
     this.B.mood = nextMood(prevMood, this.B.recentY.length >= 30 ? this.B.recentY.reduce((a, b) => a + b, 0) / this.B.recentY.length : null);
-    if (prevMood !== this.B.mood) { this.log(`market mood: ${prevMood} → ${this.B.mood}`); this.notifier.send(`Market mood changed: ${prevMood} → ${this.B.mood}`); }
+    if (prevMood !== this.B.mood) { this.log(`market mood: ${prevMood} → ${this.B.mood}`); this.notifier.send(`Market mood changed: ${prevMood} → ${this.B.mood}`, { important: true }); }
     this.learner.learn(s.x, y);
     const A = this.B.agents;
     for (const a of AGENTS) {
@@ -368,7 +368,7 @@ export class Engine extends EventEmitter {
       if (changed) {
         const msg = `sell rule tuned: take profit +${r.takeProfit * 100}%, stop loss -${r.stopLoss * 100}%, trailing ${r.trailing * 100}%, max hold ${r.maxHoldMin} min`;
         this.log(msg);
-        this.notifier.send(`🧠 New ${msg}`);
+        this.notifier.send(`🧠 New ${msg}`, { important: true });
       }
     }
   }
@@ -387,7 +387,7 @@ export class Engine extends EventEmitter {
       exitTune: this.B.exitTune,
       paths: this.B.paths.length,
       breaker: (this.L.cooldownUntil || 0) > Date.now() ? { until: this.L.cooldownUntil, why: this.L.cooldownWhy } : null,
-      telegram: this.notifier.enabled,
+      alerts: this.notifier.enabled,
     };
     this.analysisCache = { at: Date.now(), data };
     return data;
