@@ -217,6 +217,22 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--prof);outline-o
 .toast{background:var(--panel);border:1px solid var(--line);border-left:4px solid var(--prof);border-radius:10px;padding:10px 14px;box-shadow:0 10px 30px var(--shadow);animation:toast 5s ease forwards;font-size:.9rem}
 .toast.good{border-left-color:var(--gain)} .toast.bad{border-left-color:var(--loss)}
 @keyframes toast{0%{opacity:0;transform:translateY(12px)}8%,85%{opacity:1;transform:none}100%{opacity:0;transform:translateY(-6px)}}
+.verdict-box{display:grid;gap:4px;padding:12px 14px;border-radius:12px;border:1px solid var(--line);background:var(--panel-2)}
+.verdict-box b{font:700 1.05rem var(--display)}
+.verdict-box.proven{border-color:var(--gain)} .verdict-box.proven b{color:var(--gain)}
+.verdict-box.losing{border-color:var(--loss)} .verdict-box.losing b{color:var(--loss)}
+.verdict-box.unproven b{color:var(--warn)}
+.verdict-box span{font-size:.86rem;color:var(--muted)}
+.tune{display:grid;gap:8px}
+.tune-row{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;font-size:.86rem;padding:8px 10px;border-radius:10px;background:var(--panel-2)}
+.tune-row b{font-family:var(--mono);font-size:.82rem}
+.tune-row.alert{border:1px solid var(--warn)}
+.signals{display:grid;gap:5px}
+.sig{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:10px;align-items:center;font-size:.84rem}
+.sig .ic{font-family:var(--mono);font-size:.78rem;color:var(--muted)}
+.st{font:700 .66rem var(--mono);letter-spacing:.06em;text-transform:uppercase;padding:2px 8px;border-radius:999px;border:1px solid var(--line);color:var(--muted)}
+.st.alive{color:var(--gain);border-color:var(--gain)} .st.reversed{color:var(--warn);border-color:var(--warn)}
+.pill.hot{color:var(--gain);border-color:var(--gain)} .pill.cold{color:var(--prof);border-color:var(--prof)}
 footer{color:var(--muted);font-size:.82rem;max-width:80ch}
 
 @media (max-width:980px){
@@ -373,6 +389,24 @@ footer{color:var(--muted);font-size:.82rem;max-width:80ch}
     </div>
   </section>
 
+  <section class="grid2">
+    <div class="panel">
+      <div class="panel-head"><h3>Is it really working?</h3><span class="hint">Luck or a real edge</span></div>
+      <div class="verdict-box" id="edgeBox"><b id="edgeTitle">Not enough trades yet</b><span id="edgeText">After 10 finished trades, this checks whether the results could just be luck.</span></div>
+      <div class="settings" id="metrics"></div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Sold because</th><th class="num">Trades</th><th class="num">Won</th><th class="num">Avg result</th><th class="num">Profit</th></tr></thead>
+        <tbody id="reasons"><tr><td colspan="5" class="muted">No finished trades yet.</td></tr></tbody>
+      </table></div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h3>Self-improvement</h3><span class="pill" id="moodPill">Mood —</span></div>
+      <div class="tune" id="tune"></div>
+      <h3 style="font-size:.95rem;margin-top:4px">Signal health</h3>
+      <p class="hint" id="sigHint">Each signal the brain uses is graded alive, reversed or dead by how well it predicted results.</p>
+      <div class="signals" id="signals"></div>
+    </div>
+  </section>
   <section class="grid2">
     <div class="panel">
       <div class="panel-head"><h3>Open trades</h3><span class="hint" id="posHint"></span></div>
@@ -588,12 +622,47 @@ function renderLearning() {
       (S.counters.onlyHunter ? ` ${S.counters.onlyHunter} coins were blocked only by the Hunter.` : '') + meta;
   }
 }
+function renderAnalysis() {
+  const A = S.analysis; if (!A) return;
+  const e = A.edge, box = $('edgeBox');
+  if (!e.ready) { box.className = 'verdict-box'; $('edgeTitle').textContent = 'Not enough trades yet'; $('edgeText').textContent = `${e.have} of ${e.need} finished trades needed before this check means anything.`; }
+  else {
+    box.className = 'verdict-box ' + e.verdict;
+    $('edgeTitle').textContent = { proven: 'Real edge: winning beyond luck', losing: 'Losing: not just bad luck', unproven: 'Not proven yet: could be luck' }[e.verdict];
+    $('edgeText').textContent = `Average result per trade ${pct(e.mean)}. With 95% confidence the true average is between ${pct(e.lo)} and ${pct(e.hi)} (from ${e.have} trades).`;
+  }
+  const m = A.metrics;
+  const pf = m.profitFactor == null ? '—' : m.profitFactor === Infinity || m.profitFactor > 99 ? '∞' : m.profitFactor.toFixed(2);
+  $('metrics').innerHTML = [
+    ['Profit factor', pf, 'money won ÷ money lost, above 1 is good'],
+    ['Avg per trade', m.expectancySol == null ? '—' : sgnSol(m.expectancySol, 4), ''],
+    ['Worst drop', `-${(m.maxDrawdown * 100).toFixed(1)}%`, 'from the best balance'],
+    ['Losing streak', `${m.currentStreak} now · ${m.worstStreak} worst`, ''],
+  ].map(([k, v, h]) => `<div class="setting" title="${esc(h)}"><span>${k}</span><b>${esc(v)}</b></div>`).join('');
+  $('reasons').innerHTML = m.byReason.length ? m.byReason.map((r) => `<tr><td>${esc(r.reason)}</td><td class="num">${r.count}</td><td class="num">${pctPlain(r.winRate)}</td><td class="num ${cls(r.avgRet)}">${pct(r.avgRet)}</td><td class="num ${cls(r.pnl)}">${sgnSol(r.pnl, 4)}</td></tr>`).join('') : '<tr><td colspan="5" class="muted">No finished trades yet.</td></tr>';
+  const mp = $('moodPill');
+  mp.className = 'pill ' + (A.mood === 'hot' ? 'hot' : A.mood === 'cold' ? 'cold' : '');
+  mp.textContent = { hot: 'Market hot', cold: 'Market cold · stricter', normal: 'Market normal' }[A.mood] || 'Mood —';
+  const r = A.rule, t = A.exitTune, wf = A.walkForward;
+  const rows = [];
+  if (A.breaker) rows.push(`<div class="tune-row alert"><span>Circuit breaker: ${esc(A.breaker.why)}</span><b>buying again at ${new Date(A.breaker.until).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</b></div>`);
+  rows.push(`<div class="tune-row"><span>Sell rule ${A.ruleTuned ? '(tuned by the bot)' : '(your settings)'}</span><b>+${Math.round(r.takeProfit * 100)}% / -${Math.round(r.stopLoss * 100)}% / trail ${Math.round(r.trailing * 100)}% / ${r.maxHoldMin}m</b></div>`);
+  rows.push(t ? `<div class="tune-row"><span>Last tuning on ${t.paths} coins: best rule ${t.accepted ? 'adopted' : 'not better on newest coins, kept current'}</span><b>${pct(t.testAvg)} vs ${pct(t.currentTestAvg)}</b></div>` : `<div class="tune-row"><span>Sell-rule tuning starts after 90 recorded coins</span><b>${A.paths} so far</b></div>`);
+  rows.push(wf.ready ? `<div class="tune-row"><span>Brain on newer vs older coins</span><b>${pctPlain(wf.newer)} vs ${pctPlain(wf.older)} · ${wf.trend}</b></div>` : `<div class="tune-row"><span>Walk-forward check needs 80 finished coins</span><b>${wf.have} so far</b></div>`);
+  if (!A.telegram) rows.push('<div class="tune-row"><span>Telegram alerts</span><b>off: add TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID</b></div>');
+  $('tune').innerHTML = rows.join('');
+  const sg = A.signals;
+  if (!sg.ready) { $('sigHint').textContent = `Grading starts after ${sg.need} finished coins (${sg.have} so far). Each signal will be marked alive, reversed or dead.`; $('signals').innerHTML = ''; return; }
+  const counts = { alive: 0, reversed: 0, dead: 0 }; sg.signals.forEach((x) => counts[x.status]++);
+  $('sigHint').textContent = `${counts.alive} alive, ${counts.reversed} reversed, ${counts.dead} dead, across ${sg.windows} batches of coins. Alive means it reliably points to winners; reversed means it points the wrong way.`;
+  $('signals').innerHTML = sg.signals.slice(0, 10).map((x) => `<div class="sig"><span>${esc(x.name)}</span><span class="ic">IC ${x.ic >= 0 ? '+' : ''}${x.ic.toFixed(2)} · t ${x.t.toFixed(1)}</span><span class="st ${x.status}">${x.status}</span></div>`).join('');
+}
 function renderSettings() {
   const c = S.config;
   const items = [
     ['Each trade', sol(c.tradeSizeSol, 3)], ['Take profit at', pct(c.takeProfit, 0)], ['Stop loss at', pct(-c.stopLoss, 0)],
     ['Trailing stop', `${Math.round(c.trailing * 100)}% from the top`], ['Longest hold', `${c.maxHoldMin} min`], ['Open trades at once', c.maxOpen],
-    ['Stop for the day after losing', sol(c.dailyLossLimitSol, 2)], ['Buy rule', 'All 3 agents say BUY'],
+    ['Stop for the day after losing', sol(c.dailyLossLimitSol, 2)], ['Buy rule', 'All 3 agents say BUY'], ['Sell rule', S.analysis?.ruleTuned ? 'Tuned by the bot' : 'Your settings'],
   ];
   $('settings').innerHTML = items.map(([k, v]) => `<div class="setting"><span>${k}</span><b>${esc(v)}</b></div>`).join('');
   $('ctlHint').textContent = S.controlsEnabled ? 'Enter the dashboard password to pause the team or close every trade.' : 'Buttons are off until DASHBOARD_PASSWORD is set in Railway Variables.';
@@ -644,12 +713,12 @@ function renderCharts() {
 function full(s) {
   S = s;
   radarItems.splice(0, radarItems.length, ...(s.radar || []));
-  renderTop(); renderKpis(); renderPositions(); renderRadar(); renderTrades(); renderLearning(); renderSettings(); renderCharts();
+  renderTop(); renderKpis(); renderPositions(); renderRadar(); renderTrades(); renderLearning(); renderSettings(); renderAnalysis(); renderCharts();
   if (radarItems[0] && !lastShown) showCouncil(radarItems[0]);
 }
 function tick(s) {
   if (!S) return;
-  const keep = { trades: S.trades, radar: S.radar, equitySeries: S.equitySeries, learning: { ...S.learning, ...s.learning, curve: S.learning.curve, factors: S.learning.factors } };
+  const keep = { trades: S.trades, radar: S.radar, equitySeries: S.equitySeries, analysis: S.analysis, learning: { ...S.learning, ...s.learning, curve: S.learning.curve, factors: S.learning.factors } };
   S = { ...S, ...s, ...keep };
   renderTop(); renderKpis(); renderPositions();
 }

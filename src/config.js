@@ -49,8 +49,19 @@ const cfg = {
   // How the team watches coins
   watchMinutes: num('WATCH_MINUTES', 6),
   checkpoints: (env.CHECKPOINTS || '20,45,90,150,240').split(',').map(Number).filter((n) => n > 0).sort((a, b) => a - b),
-  maxTracked: num('MAX_TRACKED', 350),
-  maxShadows: num('MAX_SHADOWS', 150),
+  maxTracked: num('MAX_TRACKED', 450),
+  maxShadows: num('MAX_SHADOWS', 220),
+
+  // Self-improvement and safety
+  autoTuneExits: bool('AUTO_TUNE_EXITS', true),
+  shadowHorizonSec: num('SHADOW_HORIZON_SEC', 600), // follow each learning coin 10 min (the longest hold the tuner tries)
+  lossStreakPause: num('LOSS_STREAK_PAUSE', 5),
+  maxDrawdownPct: num('MAX_DRAWDOWN_PCT', 30) / 100,
+  cooldownMin: num('COOLDOWN_MINUTES', 60),
+
+  // Telegram alerts (optional)
+  telegramToken: env.TELEGRAM_BOT_TOKEN || '',
+  telegramChat: env.TELEGRAM_CHAT_ID || '',
 
   simSpawnMs: num('SIM_SPAWN_MS', 2500),
 };

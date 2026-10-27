@@ -3,6 +3,8 @@ import { scout } from './agents/scout.js';
 import { professor, exitReason } from './agents/professor.js';
 import { Learner, vectorize, FEATURE_NAMES } from './learner.js';
 import { buyQuote, sellQuote } from './curve.js';
+import { signalHealth, bootstrapEdge, tradeMetrics, walkForward, optimizeExits, replay, nextMood } from './analytics.js';
+
 
 const AGENTS = ['scout', 'hunter', 'professor'];
 const today = () => new Date().toISOString().slice(0, 10);
@@ -17,6 +19,7 @@ export const brainDefaults = () => ({
   thresholds: { scout: 0.5, hunter: 0.35, professor: 0.55 },
   agents: Object.fromEntries([...AGENTS, 'team'].map((a) => [a, { calls: 0, right: 0, buys: 0, buyWins: 0 }])),
   samples: [], curve: [], labels: 0,
+  paths: [], exitRule: null, exitTune: null, mood: 'normal', recentY: [],
 });
 
 /**
@@ -25,10 +28,13 @@ export const brainDefaults = () => ({
  * It also "shadow trades" coins it did not buy, so it learns from thousands of outcomes, not just its own trades.
  */
 export class Engine extends EventEmitter {
-  constructor({ cfg, feed, market, hunter, broker, ledger, brain, sol, log, fetchMeta, dexPrice, metaStats }) {
+  constructor({ cfg, feed, market, hunter, broker, ledger, brain, sol, log, fetchMeta, dexPrice, metaStats, notifier }) {
     super();
     Object.assign(this, { cfg, feed, market, hunter, broker, ledger, brain, sol, log, fetchMeta, dexPrice });
     this.metaStats = metaStats || null;
+    this.notifier = notifier || { send() {}, enabled: false };
+    this.analysisCache = null;
+    for (const [k, v] of Object.entries(brainDefaults())) if (this.B[k] === undefined) this.B[k] = v;
     this.learner = new Learner(FEATURE_NAMES.length, brain.state.learner);
     this.shadows = new Map();
     this.radar = [];
@@ -51,6 +57,12 @@ export class Engine extends EventEmitter {
     setInterval(() => this.persist(), 30_000);
     if (this.cfg.live) { const w = async () => { this.wallet = await this.broker.walletBalance(); }; w(); setInterval(w, 60_000); }
     this.sampleEquity();
+  }
+
+  /** The sell rule in force: the tuned one if self-tuning is on, otherwise the settings. */
+  rule() {
+    const base = { takeProfit: this.cfg.takeProfit, stopLoss: this.cfg.stopLoss, trailing: this.cfg.trailing, maxHoldMin: this.cfg.maxHoldMin };
+    return this.cfg.autoTuneExits && this.B.exitRule ? { ...base, ...this.B.exitRule } : base;
   }
 
   // ---------- costs ----------
@@ -120,7 +132,11 @@ export class Engine extends EventEmitter {
       const t = this.market.tokens.get(s.mint);
       if (t) this.updateShadow(s, t, now); else this.resolveShadow(s, s.lastRet, 'coin dropped');
     }
-    if (this.L.daily.date !== today()) this.L.daily = { date: today(), pnl: 0 };
+    if (this.L.daily.date !== today()) {
+      const y = this.L.daily;
+      if (y.date) this.notifier.send(`📊 Day ${y.date}: ${y.pnl >= 0 ? '+' : ''}${y.pnl.toFixed(4)} SOL. Balance ${this.equityNow().toFixed(3)} SOL, ${this.L.trades.length} trades so far, brain accuracy ${this.learner.accuracy() == null ? '—' : Math.round(this.learner.accuracy() * 100) + '%'}.`);
+      this.L.daily = { date: today(), pnl: 0 };
+    }
   }
 
   // ---------- the council ----------
@@ -141,8 +157,9 @@ export class Engine extends EventEmitter {
       f = this.market.features(t, Date.now()); // fresh numbers after any X lookup
       const x = vectorize(f, h.score);
       const pr = professor(f, s, h, this.learner, x);
-      pr.vote = pr.critical ? 'avoid' : pr.score >= th.professor ? 'buy' : 'wait';
-      if (!pr.critical) pr.thought += ` · needs ${Math.round(th.professor * 100)}%`;
+      const profBar = Math.min(0.9, th.professor + (this.B.mood === 'cold' ? 0.1 : 0));
+      pr.vote = pr.critical ? 'avoid' : pr.score >= profBar ? 'buy' : 'wait';
+      if (!pr.critical) pr.thought += ` · needs ${Math.round(profBar * 100)}%${this.B.mood === 'cold' ? ' (cold market)' : ''}`;
 
       const team = s.vote === 'buy' && h.vote === 'buy' && pr.vote === 'buy';
       const nb = (this.L.counters.notBuy ||= { scout: 0, hunter: 0, professor: 0 });
@@ -168,6 +185,7 @@ export class Engine extends EventEmitter {
     if (this.holding(t.mint) || t.bought) return 'already traded this coin';
     if (this.L.positions.length >= this.cfg.maxOpen) return 'max open positions';
     if (this.L.daily.pnl <= -this.cfg.dailyLossLimitSol) return 'daily loss limit reached';
+    if ((this.L.cooldownUntil || 0) > Date.now()) return `cooling down after losses until ${new Date(this.L.cooldownUntil).toISOString().slice(11, 16)} UTC`;
     if (!this.broker.ready) return 'live trading needs PUMPPORTAL_API_KEY';
     if (this.broker.errors >= 3) return 'stopped after 3 trade errors';
     if (!this.cfg.live && this.L.balance < this.cfg.tradeSizeSol + this.cfg.priorityFeeSol) return 'not enough practice balance';
@@ -193,6 +211,7 @@ export class Engine extends EventEmitter {
     this.L.counters.deals++;
     this.log(`DEAL ${this.cfg.mode.toUpperCase()} buy $${t.symbol} ${size} SOL`);
     this.emit('deal', this.publicPos(p, now));
+    this.notifier.send(`🟢 ${this.cfg.mode === 'live' ? 'REAL' : 'Practice'} buy $${t.symbol} for ${size} SOL\nScout: ${v.s.thought}\nHunter: ${v.h.thought}\nProfessor: ${v.pr.thought}\nhttps://pump.fun/coin/${t.mint}`);
     this.ledger.save();
     return true;
   }
@@ -208,7 +227,7 @@ export class Engine extends EventEmitter {
       this.dexPrice(t.mint).then((px) => { if (px) t.price = px; }).catch(() => {});
     }
     const f = this.market.features(t, now);
-    const reason = exitReason({ ret, peakRet: p.peakRet, heldSec: (now - p.openedAt) / 1000, creatorSoldNow: t.creatorSold && !p.creatorSoldAtEntry, flow30: f.vel }, this.cfg);
+    const reason = exitReason({ ret, peakRet: p.peakRet, heldSec: (now - p.openedAt) / 1000, creatorSoldNow: t.creatorSold && !p.creatorSoldAtEntry, flow30: f.vel }, this.rule());
     if (reason) this.close(p, t, reason);
   }
 
@@ -232,7 +251,26 @@ export class Engine extends EventEmitter {
     this.log(`EXIT $${p.symbol} ${(trade.ret * 100).toFixed(1)}% (${reason})`);
     this.emit('exit', trade);
     this.sampleEquity();
+    this.notifier.send(`${trade.pnl >= 0 ? '✅' : '🔻'} Sold $${p.symbol}: ${(trade.ret * 100).toFixed(1)}% (${trade.pnl >= 0 ? '+' : ''}${trade.pnl.toFixed(4)} SOL), ${reason}`);
+    this.checkBreaker();
     this.ledger.save();
+  }
+
+  /** Circuit breaker: stop buying for a while after a losing streak or a deep drawdown. */
+  checkBreaker() {
+    let streak = 0;
+    for (const t of this.L.trades) { if (t.pnl < 0) streak++; else break; }
+    const peak = this.L.ddPeak ?? Math.max(this.L.startBalance, ...this.L.equity.map((e) => e.v));
+    const dd = peak > 0 ? 1 - this.equityNow() / peak : 0;
+    let why = '';
+    if (streak >= this.cfg.lossStreakPause) why = `${streak} losing trades in a row`;
+    else if (dd >= this.cfg.maxDrawdownPct) why = `down ${(dd * 100).toFixed(0)}% from the best balance`;
+    if (!why || (this.L.cooldownUntil || 0) > Date.now()) return;
+    this.L.cooldownUntil = Date.now() + this.cfg.cooldownMin * 60_000;
+    this.L.cooldownWhy = why;
+    if (dd >= this.cfg.maxDrawdownPct) this.L.ddPeak = this.equityNow(); // measure the next drawdown from here
+    this.log(`circuit breaker: ${why}, pausing buys for ${this.cfg.cooldownMin} min`);
+    this.notifier.send(`⏸ Circuit breaker: ${why}. No new buys for ${this.cfg.cooldownMin} minutes. The team keeps watching and learning.`);
   }
 
   // ---------- learning from shadow trades ----------
@@ -242,7 +280,7 @@ export class Engine extends EventEmitter {
     this.shadows.set(t.mint, {
       mint: t.mint, symbol: t.symbol, t0: Date.now(), x, team,
       cost: size + this.cfg.priorityFeeSol, tokens: this.quoteBuy(t, size),
-      peakRet: 0, lastRet: 0, creatorSoldAtEntry: t.creatorSold,
+      peakRet: 0, lastRet: 0, creatorSoldAtEntry: t.creatorSold, path: [[0, 0]], creatorSoldSec: null,
       scores: { scout: v.s.score, hunter: v.h.score, professor: v.pr.score },
       votes: { scout: v.s.vote, hunter: v.h.vote, professor: v.pr.vote },
     });
@@ -251,15 +289,31 @@ export class Engine extends EventEmitter {
   updateShadow(s, t, now) {
     const value = Math.max(0, this.quoteSell(t, s.tokens) - this.cfg.priorityFeeSol);
     const ret = value / s.cost - 1;
+    const sec = (now - s.t0) / 1000;
+    const last = s.path[s.path.length - 1];
+    if ((sec - last[0] >= 5 || Math.abs(ret - last[1]) >= 0.03) && s.path.length < 260) s.path.push([Math.round(sec), +ret.toFixed(4)]);
     s.lastRet = ret; s.peakRet = Math.max(s.peakRet, ret);
-    const f = this.market.features(t, now);
-    const reason = exitReason({ ret, peakRet: s.peakRet, heldSec: (now - s.t0) / 1000, creatorSoldNow: t.creatorSold && !s.creatorSoldAtEntry, flow30: f.vel }, this.cfg);
-    if (reason) this.resolveShadow(s, ret, reason);
+    if (t.creatorSold && !s.creatorSoldAtEntry && s.creatorSoldSec == null) s.creatorSoldSec = sec;
+    // Keep following past the current sell rule so the tuner can test other rules on this coin.
+    if (sec >= this.cfg.shadowHorizonSec || ret <= -0.9) this.resolveShadow(s, ret, 'horizon');
   }
 
-  resolveShadow(s, ret, reason) {
+  resolveShadow(s, finalRet, reason) {
     if (!this.shadows.delete(s.mint)) return;
+    const last = s.path[s.path.length - 1];
+    if (last[1] !== +finalRet.toFixed(4)) s.path.push([Math.round((Date.now() - s.t0) / 1000), +finalRet.toFixed(4)]);
+    // What the current sell rule would have made on this coin = the lesson for the brain.
+    let path = s.path;
+    if (s.creatorSoldSec != null) path = path.filter(([sec]) => sec <= s.creatorSoldSec);
+    const ret = replay(path, this.rule());
     const y = ret > 0 ? 1 : 0;
+    this.B.paths.push(s.path);
+    if (this.B.paths.length > 450) this.B.paths.splice(0, this.B.paths.length - 450);
+    this.B.recentY.push(y);
+    if (this.B.recentY.length > 60) this.B.recentY.splice(0, this.B.recentY.length - 60);
+    const prevMood = this.B.mood;
+    this.B.mood = nextMood(prevMood, this.B.recentY.length >= 30 ? this.B.recentY.reduce((a, b) => a + b, 0) / this.B.recentY.length : null);
+    if (prevMood !== this.B.mood) { this.log(`market mood: ${prevMood} → ${this.B.mood}`); this.notifier.send(`Market mood changed: ${prevMood} → ${this.B.mood}`); }
     this.learner.learn(s.x, y);
     const A = this.B.agents;
     for (const a of AGENTS) {
@@ -268,7 +322,7 @@ export class Engine extends EventEmitter {
       else if (v === 'avoid') { st.calls++; if (!y) st.right++; }
     }
     if (s.team) { A.team.buys++; if (y) A.team.buyWins++; }
-    this.B.samples.push({ p: s.scores.professor, scout: s.scores.scout, hunter: s.scores.hunter, ret: +ret.toFixed(4) });
+    this.B.samples.push({ p: s.scores.professor, scout: s.scores.scout, hunter: s.scores.hunter, ret: +ret.toFixed(4), x: s.x.map((v) => +v.toFixed(3)) });
     if (this.B.samples.length > 600) this.B.samples.splice(0, this.B.samples.length - 600);
     this.B.labels++;
     if (this.B.labels % 10 === 0) {
@@ -276,6 +330,7 @@ export class Engine extends EventEmitter {
       if (this.B.curve.length > 1500) this.B.curve.splice(0, this.B.curve.length - 1500);
     }
     if (this.B.labels % 20 === 0) this.retune();
+    if (this.B.labels % 50 === 0) this.tuneExits();
     this.brain.save();
   }
 
@@ -298,6 +353,44 @@ export class Engine extends EventEmitter {
     th.scout = best('scout', g(0.35, 0.85), 0.35) ?? th.scout;
     th.hunter = best('hunter', g(0.2, 0.75), 0.2) ?? th.hunter;
     th.professor = best('p', g(0.45, 0.85), 0.45) ?? th.professor;
+  }
+
+  /** Try every sell rule in the grid on recorded coins; adopt a better one only if it holds up on the newest coins. */
+  tuneExits() {
+    if (!this.cfg.autoTuneExits) return;
+    const res = optimizeExits(this.B.paths, this.rule());
+    if (!res) return;
+    this.B.exitTune = { ...res, at: Date.now() };
+    if (res.accepted) {
+      const r = res.rule;
+      const changed = JSON.stringify(r) !== JSON.stringify(this.B.exitRule);
+      this.B.exitRule = r;
+      if (changed) {
+        const msg = `sell rule tuned: take profit +${r.takeProfit * 100}%, stop loss -${r.stopLoss * 100}%, trailing ${r.trailing * 100}%, max hold ${r.maxHoldMin} min`;
+        this.log(msg);
+        this.notifier.send(`🧠 New ${msg}`);
+      }
+    }
+  }
+
+  analysis() {
+    if (this.analysisCache && Date.now() - this.analysisCache.at < 60_000) return this.analysisCache.data;
+    const rets = this.L.trades.map((t) => t.ret);
+    const data = {
+      edge: bootstrapEdge(rets),
+      metrics: tradeMetrics(this.L.trades, this.L.equity, this.L.startBalance),
+      signals: signalHealth(this.B.samples),
+      walkForward: walkForward(this.learner.recent),
+      mood: this.B.mood,
+      rule: this.rule(),
+      ruleTuned: !!(this.cfg.autoTuneExits && this.B.exitRule),
+      exitTune: this.B.exitTune,
+      paths: this.B.paths.length,
+      breaker: (this.L.cooldownUntil || 0) > Date.now() ? { until: this.L.cooldownUntil, why: this.L.cooldownWhy } : null,
+      telegram: this.notifier.enabled,
+    };
+    this.analysisCache = { at: Date.now(), data };
+    return data;
   }
 
   // ---------- dashboard data ----------
@@ -328,7 +421,9 @@ export class Engine extends EventEmitter {
 
   sampleEquity() {
     const E = this.L.equity;
-    E.push({ t: Date.now(), v: +this.equityNow().toFixed(5) });
+    const v = +this.equityNow().toFixed(5);
+    E.push({ t: Date.now(), v });
+    if (this.L.ddPeak != null) this.L.ddPeak = Math.max(this.L.ddPeak, v);
     if (E.length > 4000) { const half = E.splice(0, 2000); E.unshift(...half.filter((_, i) => i % 2 === 0)); }
   }
 
@@ -336,7 +431,7 @@ export class Engine extends EventEmitter {
 
   async control(action) {
     if (action === 'pause') this.L.paused = true;
-    else if (action === 'resume') { this.L.paused = false; this.broker.errors = 0; }
+    else if (action === 'resume') { this.L.paused = false; this.broker.errors = 0; this.L.cooldownUntil = 0; }
     else if (action === 'closeAll') {
       for (const p of [...this.L.positions]) { const t = this.market.tokens.get(p.mint); if (t) await this.close(p, t, 'closed by you'); }
     } else return { ok: false, error: 'Unknown action' };
@@ -373,7 +468,7 @@ export class Engine extends EventEmitter {
       learning: { samples: this.learner.n, accuracy: this.learner.accuracy(), watching: this.shadows.size },
       counters: { ...this.L.counters, tracked: this.market.tokens.size },
       meta: this.metaStats ? { ...this.metaStats } : null,
-      config: { tradeSizeSol: this.cfg.tradeSizeSol, takeProfit: this.cfg.takeProfit, stopLoss: this.cfg.stopLoss, trailing: this.cfg.trailing, maxHoldMin: this.cfg.maxHoldMin, maxOpen: this.cfg.maxOpen, dailyLossLimitSol: this.cfg.dailyLossLimitSol },
+      config: { tradeSizeSol: this.cfg.tradeSizeSol, ...this.rule(), maxOpen: this.cfg.maxOpen, dailyLossLimitSol: this.cfg.dailyLossLimitSol },
     };
     if (full) {
       snap.trades = trades.slice(0, 60);
@@ -382,6 +477,7 @@ export class Engine extends EventEmitter {
       snap.equitySeries = E.filter((_, i) => i % step === 0 || i === E.length - 1);
       snap.learning.curve = this.B.curve.slice(-300);
       snap.learning.factors = this.learner.n >= 30 ? this.learner.factors().slice(0, 7) : [];
+      snap.analysis = this.analysis();
     }
     return snap;
   }

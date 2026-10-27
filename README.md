@@ -14,6 +14,14 @@ A meme coin trading bot for **pump.fun** run by three agents, with a live dashbo
 
 **Practice money by default.** Trades are simulated at real pump.fun prices, with pump.fun fees, PumpPortal fees, a delay penalty and priority fees included. Real-money trading is built in but switched off (see the bottom of this guide).
 
+### Self-improvement and safety (ideas adapted from [HKUDS/Vibe-Trading](https://github.com/HKUDS/Vibe-Trading), MIT)
+- **Self-tuning sell rule:** every learning coin is followed for 10 minutes and its price path is saved. Every 50 coins the bot replays 108 sell rules (take profit, stop loss, trailing stop, max hold) on older coins, then adopts the best one only if it also beats the current rule on the newest coins (walk-forward). Turn off with `AUTO_TUNE_EXITS=false`.
+- **Signal health:** each of the 15 signals is graded *alive*, *reversed* or *dead* by its information coefficient across batches of coins, the same test Vibe-Trading uses for its alpha library.
+- **Is it really working?** A bootstrap 95% range for the average trade result says whether profits are a real edge or could be luck. Plus profit factor, worst drop, losing streaks, and results by sell reason.
+- **Market mood:** a hot/normal/cold state with two thresholds (hysteresis) from recent coin outcomes. In a cold market the Professor's bar rises by 10 points.
+- **Circuit breaker:** no new buys for `COOLDOWN_MINUTES` (60) after `LOSS_STREAK_PAUSE` (5) losses in a row, or a `MAX_DRAWDOWN_PCT` (30%) drop from the best balance. The Resume button clears it.
+- **Telegram alerts (optional):** buys, sells, breaker, mood changes, tuned rules and a daily summary. Create a bot with @BotFather, message it once, then set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` (find the chat id at `https://api.telegram.org/bot<token>/getUpdates`).
+
 ---
 
 ## Put it on Railway (about 10 minutes)
