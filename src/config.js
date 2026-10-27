@@ -25,15 +25,6 @@ const cfg = {
   anthropicKey: env.ANTHROPIC_API_KEY || '',
   anthropicModel: env.ANTHROPIC_MODEL || 'claude-haiku-5-5',
   hunterLlmPerHour: num('HUNTER_LLM_PER_HOUR', 4),
-  anthropicBase: env.ANTHROPIC_BASE_URL || '',
-  claudeInSim: bool('CLAUDE_IN_SIM', false), // testing only
-  claudeRiskCheck: bool('CLAUDE_RISK_CHECK', true),
-  claudeRiskModel: env.CLAUDE_RISK_MODEL || 'claude-haiku-5-5',
-  claudeRiskTimeoutMs: num('CLAUDE_RISK_TIMEOUT_MS', 6000),
-  claudeChecksPerDay: num('CLAUDE_CHECKS_PER_DAY', 200),
-  claudeCoach: bool('CLAUDE_COACH', true),
-  claudeCoachModel: env.CLAUDE_COACH_MODEL || 'claude-sonnet-5-5',
-  coachHours: num('COACH_HOURS', 12),
   xChecksPerHour: num('X_CHECKS_PER_HOUR', 6),
 
   password: env.DASHBOARD_PASSWORD || '',
