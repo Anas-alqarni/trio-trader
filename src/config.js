@@ -55,6 +55,12 @@ const cfg = {
 
   // Self-improvement and safety
   autoTuneExits: bool('AUTO_TUNE_EXITS', true),
+  maxTakeProfit: num('MAX_TAKE_PROFIT_PCT', 40) / 100,  // the tuner never aims higher than this
+  // How strict the team may get. Bars can never go above these, and a coin in the top TOP_PERCENT
+  // of everything the agents saw recently always passes that agent, so the team keeps trading.
+  maxBars: { scout: num('MAX_SCOUT_BAR', 0.5), hunter: num('MAX_HUNTER_BAR', 0.3), professor: num('MAX_PROFESSOR_BAR', 0.45) },
+  topPercent: num('TOP_PERCENT', 12) / 100,
+  coldMarketStricter: bool('COLD_MARKET_STRICTER', false),
   shadowHorizonSec: num('SHADOW_HORIZON_SEC', 600), // follow each learning coin 10 min (the longest hold the tuner tries)
   lossStreakPause: num('LOSS_STREAK_PAUSE', 5),
   maxDrawdownPct: num('MAX_DRAWDOWN_PCT', 30) / 100,

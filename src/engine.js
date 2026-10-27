@@ -33,6 +33,12 @@ export class Engine extends EventEmitter {
     Object.assign(this, { cfg, feed, market, hunter, broker, ledger, brain, sol, log, fetchMeta, dexPrice });
     this.metaStats = metaStats || null;
     this.notifier = notifier || { send() {}, enabled: false };
+    this.recentScores = { scout: [], hunter: [], professor: [] };
+    // One-time: the old tuner could aim for +100%. Bring take profit down to the cap, keep the stop loss.
+    if (this.B.exitRule && this.B.exitRule.takeProfit > this.cfg.maxTakeProfit) {
+      this.B.exitRule = { ...this.B.exitRule, takeProfit: Math.min(0.3, this.cfg.maxTakeProfit), trailing: Math.min(this.B.exitRule.trailing, 0.12) };
+    }
+    for (const k of ['scout', 'hunter', 'professor']) this.B.thresholds[k] = Math.min(this.B.thresholds[k], this.cfg.maxBars[k]);
     this.analysisCache = null;
     for (const [k, v] of Object.entries(brainDefaults())) if (this.B[k] === undefined) this.B[k] = v;
     this.learner = new Learner(FEATURE_NAMES.length, brain.state.learner);
@@ -148,18 +154,20 @@ export class Engine extends EventEmitter {
       const th = this.B.thresholds;
       let f = this.market.features(t, Date.now());
       const s = scout(f);
-      s.vote = s.critical ? 'avoid' : s.score >= th.scout ? 'buy' : 'wait';
+      s.vote = s.critical ? 'avoid' : s.score >= this.bar('scout', s.score) ? 'buy' : 'wait';
 
       let h = this.hunter.quick(t);
       if (s.vote === 'buy') h = await this.hunter.deep(t);
-      h.vote = h.critical ? 'avoid' : h.score >= th.hunter ? 'buy' : 'wait';
+      // No links loaded yet = no information, so the Hunter does not block; he only blocks on what he can see.
+      h.vote = h.critical ? 'avoid' : !t.meta || h.score >= this.bar('hunter', h.score) ? 'buy' : 'wait';
+      if (!t.meta && !h.critical) h.thought = 'Links not loaded, no objection';
 
       f = this.market.features(t, Date.now()); // fresh numbers after any X lookup
       const x = vectorize(f, h.score);
       const pr = professor(f, s, h, this.learner, x);
-      const profBar = Math.min(0.9, th.professor + (this.B.mood === 'cold' ? 0.1 : 0));
+      const profBar = this.bar('professor', pr.score, this.cfg.coldMarketStricter && this.B.mood === 'cold' ? 0.1 : 0);
       pr.vote = pr.critical ? 'avoid' : pr.score >= profBar ? 'buy' : 'wait';
-      if (!pr.critical) pr.thought += ` · needs ${Math.round(profBar * 100)}%${this.B.mood === 'cold' ? ' (cold market)' : ''}`;
+      if (!pr.critical) pr.thought += ` · needs ${Math.round(profBar * 100)}%`;
 
       const team = s.vote === 'buy' && h.vote === 'buy' && pr.vote === 'buy';
       const nb = (this.L.counters.notBuy ||= { scout: 0, hunter: 0, professor: 0 });
@@ -183,7 +191,7 @@ export class Engine extends EventEmitter {
   canOpen(t) {
     if (this.L.paused) return 'paused';
     if (this.holding(t.mint) || t.bought) return 'already traded this coin';
-    if (this.L.positions.length >= this.cfg.maxOpen) return 'max open positions';
+    if (this.L.positions.length + (this.opening || 0) >= this.cfg.maxOpen) return 'max open positions';
     if (this.L.daily.pnl <= -this.cfg.dailyLossLimitSol) return 'daily loss limit reached';
     if ((this.L.cooldownUntil || 0) > Date.now()) return `cooling down after losses until ${new Date(this.L.cooldownUntil).toISOString().slice(11, 16)} UTC`;
     if (!this.broker.ready) return 'live trading needs PUMPPORTAL_API_KEY';
@@ -195,7 +203,8 @@ export class Engine extends EventEmitter {
   async open(t, v) {
     const size = this.cfg.tradeSizeSol, now = Date.now();
     let fill;
-    try { fill = await this.broker.buy(t, size, this); } catch (e) { this.log('buy failed', t.symbol, e.message); return false; }
+    this.opening = (this.opening || 0) + 1; // reserve the slot while the order is in flight
+    try { fill = await this.broker.buy(t, size, this); } catch (e) { this.log('buy failed', t.symbol, e.message); return false; } finally { this.opening--; }
     const cost = size + this.cfg.priorityFeeSol;
     const p = {
       id: `${now}-${t.mint.slice(0, 6)}`, mint: t.mint, symbol: t.symbol, name: t.name, openedAt: now,
@@ -335,6 +344,23 @@ export class Engine extends EventEmitter {
   }
 
   /** Move each agent's bar to wherever recent coins actually made money (never looser than a floor). */
+  /**
+   * The bar an agent uses right now: its learned bar, never above the owner's maximum, and relative —
+   * a coin in the top TOP_PERCENT of recent scores passes even when the learned bar is higher.
+   */
+  bar(agent, score, extra = 0) {
+    const arr = this.recentScores[agent];
+    arr.push(score);
+    if (arr.length > 400) arr.shift();
+    let b = Math.min(this.B.thresholds[agent], this.cfg.maxBars[agent]);
+    if (arr.length >= 80) {
+      const sorted = [...arr].sort((x, y) => x - y);
+      const topCut = sorted[Math.floor(sorted.length * (1 - this.cfg.topPercent))];
+      b = Math.min(b, topCut);
+    }
+    return Math.min(0.95, b + extra);
+  }
+
   retune() {
     const S = this.B.samples;
     if (S.length < 60) return;
@@ -350,15 +376,16 @@ export class Engine extends EventEmitter {
     };
     const g = (a, b) => Array.from({ length: Math.round((b - a) / 0.05) + 1 }, (_, i) => +(a + i * 0.05).toFixed(2));
     const th = this.B.thresholds;
-    th.scout = best('scout', g(0.35, 0.85), 0.35) ?? th.scout;
-    th.hunter = best('hunter', g(0.2, 0.75), 0.2) ?? th.hunter;
-    th.professor = best('p', g(0.45, 0.85), 0.45) ?? th.professor;
+    const mb = this.cfg.maxBars;
+    th.scout = Math.min(mb.scout, best('scout', g(0.25, 0.85), 0.25) ?? th.scout);
+    th.hunter = Math.min(mb.hunter, best('hunter', g(0.1, 0.75), 0.1) ?? th.hunter);
+    th.professor = Math.min(mb.professor, best('p', g(0.2, 0.85), 0.2) ?? th.professor);
   }
 
   /** Try every sell rule in the grid on recorded coins; adopt a better one only if it holds up on the newest coins. */
   tuneExits() {
     if (!this.cfg.autoTuneExits) return;
-    const res = optimizeExits(this.B.paths, this.rule());
+    const res = optimizeExits(this.B.paths, this.rule(), this.cfg.maxTakeProfit);
     if (!res) return;
     this.B.exitTune = { ...res, at: Date.now() };
     if (res.accepted) {

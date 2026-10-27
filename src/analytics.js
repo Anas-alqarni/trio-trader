@@ -122,26 +122,26 @@ export function replay(path, rule) {
   return last;
 }
 
-export const EXIT_GRID = (() => {
+/** Sell rules to try. The stop loss stays fixed (yours); take profit never goes above maxTakeProfit. */
+export function exitGrid(stopLoss, maxTakeProfit) {
   const out = [];
-  for (const takeProfit of [0.25, 0.4, 0.6, 1.0])
-    for (const stopLoss of [0.15, 0.25, 0.35])
-      for (const trailing of [0.1, 0.2, 0.3])
-        for (const maxHoldMin of [3, 6, 10]) out.push({ takeProfit, stopLoss, trailing, maxHoldMin });
+  for (const takeProfit of [0.15, 0.2, 0.25, 0.3, 0.4, 0.5].filter((v) => v <= maxTakeProfit + 1e-9))
+    for (const trailing of [0.08, 0.12, 0.2])
+      for (const maxHoldMin of [3, 6, 10]) out.push({ takeProfit, stopLoss, trailing, maxHoldMin });
   return out;
-})();
+}
 
 /**
  * Pick the sell rule that made the most on older paths, then keep it only if it also beats the
  * current rule on the newest third (walk-forward). Returns null if nothing clearly better.
  */
-export function optimizeExits(paths, current) {
+export function optimizeExits(paths, current, maxTakeProfit = 0.4) {
   if (paths.length < 90) return null;
   const cut = Math.floor(paths.length * 2 / 3);
   const train = paths.slice(0, cut), test = paths.slice(cut);
   const score = (set, rule) => mean(set.map((p) => replay(p, rule)));
   let best = null;
-  for (const rule of EXIT_GRID) {
+  for (const rule of exitGrid(current.stopLoss, maxTakeProfit)) {
     const s = score(train, rule);
     if (!best || s > best.train) best = { rule, train: s };
   }
