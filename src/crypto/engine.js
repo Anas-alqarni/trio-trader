@@ -166,7 +166,13 @@ export class CryptoEngine extends EventEmitter {
     const nb = (this.L.counters.notBuy ||= { scout: 0, hunter: 0, professor: 0 });
     if (s.vote !== 'buy') nb.scout++; if (h.vote !== 'buy') nb.hunter++; if (pr.vote !== 'buy') nb.professor++;
     let decision = team ? 'buy' : 'pass', blocked = '';
-    if (team) { blocked = this.canOpen(coin); if (!blocked) { this.open(coin, f, { s, h, pr }); decision = 'bought'; } else decision = 'blocked'; }
+    // A "super deal": far above the bars on every count. It may use an extra slot when the normal ones are full.
+    const superDeal = team && pr.score >= Math.max(pb + this.C.superMargin, this.C.superMinProb) && s.score >= this.C.superMinScout;
+    if (team) {
+      blocked = this.canOpen(coin, superDeal);
+      if (!blocked) { const extra = this.L.positions.length + this.opening >= this.C.maxOpen; this.open(coin, f, { s, h, pr }, extra); decision = 'bought'; if (extra) pr.thought = `Super deal: ${pr.thought}`; }
+      else decision = 'blocked';
+    }
     const lastT = coin.closed[coin.closed.length - 1].t;
     if (team || lastT - coin.lastShadowT >= 3 * this.candleMs) {
       coin.lastShadowT = lastT;
@@ -184,17 +190,18 @@ export class CryptoEngine extends EventEmitter {
     this.emit('radar', item);
   }
 
-  canOpen(coin) {
+  canOpen(coin, superDeal = false) {
     if (this.L.paused) return 'paused';
     if (this.L.positions.some((p) => p.mint === coin.product)) return 'already holding it';
-    if (this.L.positions.length + this.opening >= this.C.maxOpen) return 'max open positions';
+    const limit = this.C.maxOpen + (superDeal ? this.C.superSlots : 0);
+    if (this.L.positions.length + this.opening >= limit) return superDeal ? 'even the super-deal slot is full' : 'max open positions';
     if (this.L.daily.pnl <= -this.C.dailyLossLimit) return 'daily loss limit reached';
     if ((this.L.cooldownUntil || 0) > Date.now()) return 'cooling down after losses';
     if (this.L.balance < this.C.tradeSize) return 'not enough practice balance';
     return '';
   }
 
-  open(coin, f, v) {
+  open(coin, f, v, superDeal = false) {
     const now = Date.now(), cost = this.C.tradeSize;
     const p = {
       id: `${now}-${coin.symbol}`, mint: coin.product, symbol: coin.symbol, name: coin.name, openedAt: now,
@@ -204,9 +211,10 @@ export class CryptoEngine extends EventEmitter {
     this.L.balance -= cost;
     this.L.positions.push(p);
     this.L.counters.deals++;
-    this.log(`DEAL crypto buy ${coin.symbol} $${cost} at ${fmtPrice(f.price)}`);
+    if (superDeal) p.superDeal = true;
+    this.log(`DEAL crypto buy ${coin.symbol} $${cost} at ${fmtPrice(f.price)}${superDeal ? ' (super deal, extra slot)' : ''}`);
     this.emit('deal', this.publicPos(p));
-    this.notifier.send(`🟢 Practice buy ${coin.symbol} $${cost} at ${fmtPrice(f.price)}\nProfessor: ${v.pr.thought}`);
+    this.notifier.send(`${superDeal ? '⭐ SUPER DEAL (extra slot)' : '🟢'} Practice buy ${coin.symbol} $${cost} at ${fmtPrice(f.price)}\nProfessor: ${v.pr.thought}`);
     this.ledger.save();
   }
 

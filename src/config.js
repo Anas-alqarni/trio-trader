@@ -28,6 +28,11 @@ const cfg = {
     maxHoldMin: num('CRYPTO_MAX_HOLD_MINUTES', 360),
     maxTakeProfit: num('CRYPTO_MAX_TAKE_PROFIT_PCT', 4) / 100,
     maxAtr: num('CRYPTO_MAX_ATR_PCT', 1.2) / 100,
+    // Super deals: when every slot is full, a coin far above the bars can still get in.
+    superSlots: num('CRYPTO_SUPER_SLOTS', 1),
+    superMinProb: num('CRYPTO_SUPER_MIN_PROB', 65) / 100,  // Professor's chance of profit at least this…
+    superMargin: num('CRYPTO_SUPER_MARGIN', 15) / 100,     // …and this far above his normal bar
+    superMinScout: num('CRYPTO_SUPER_MIN_SCOUT', 0.75),    // and a very strong chart
     maxBars: { scout: num('CRYPTO_MAX_SCOUT_BAR', 0.55), hunter: num('CRYPTO_MAX_HUNTER_BAR', 0.5), professor: num('CRYPTO_MAX_PROFESSOR_BAR', 0.5) },
   },
   port: num('PORT', 3000),

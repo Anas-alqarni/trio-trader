@@ -615,7 +615,7 @@ function renderPositions(flashId) {
   box.innerHTML = S.positions.map((p) => {
     const r = p.lastRet || 0;
     return `<div class="pos ${p.id === flashId ? 'flash' : ''}">
-      <div class="pos-top"><span><b>$${esc(p.symbol)}</b> <span class="muted">${esc(p.name)}</span></span><span class="pos-ret ${cls(r)}">${pct(r)}</span></div>
+      <div class="pos-top"><span><b>$${esc(p.symbol)}</b> ${p.superDeal ? '<span class="st alive">super</span> ' : ''}<span class="muted">${esc(p.name)}</span></span><span class="pos-ret ${cls(r)}">${pct(r)}</span></div>
       <div class="track"><span class="zero" style="left:${x(0)}%"></span><span class="now" style="left:${x(r)}%;background:${r >= 0 ? 'var(--gain)' : 'var(--loss)'}"></span></div>
       <div class="track-labels"><span>sell at ${pct(lo, 0)}</span><span>${sol(p.value, 4)} · held ${dur(p.heldSec)}</span><span>sell at ${pct(hi, 0)}</span></div>
     </div>`;
