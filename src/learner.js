@@ -20,7 +20,8 @@ export function vectorize(f, social) {
  * whether a coin with these features made money. Features are standardized on the fly.
  */
 export class Learner {
-  constructor(dim, saved) {
+  constructor(dim, saved, names = FEATURE_NAMES) {
+    this.names = names;
     const ok = saved && Array.isArray(saved.w) && saved.w.length === dim;
     this.dim = dim;
     this.w = ok ? saved.w : Array(dim).fill(0);
@@ -69,7 +70,7 @@ export class Learner {
     return r.filter(([p, y]) => (p >= 0.5 ? 1 : 0) === y).length / r.length;
   }
   factors() {
-    return FEATURE_NAMES.map((name, i) => ({ name, weight: +this.w[i].toFixed(3) }))
+    return this.names.map((name, i) => ({ name, weight: +this.w[i].toFixed(3) }))
       .sort((a, b) => Math.abs(b.weight) - Math.abs(a.weight));
   }
   toJSON() { return { w: this.w, b: this.b, n: this.n, mean: this.mean, m2: this.m2, recent: this.recent }; }

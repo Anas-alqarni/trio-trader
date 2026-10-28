@@ -12,6 +12,8 @@ import { LiveBroker } from './broker/live.js';
 import { Engine, ledgerDefaults, brainDefaults } from './engine.js';
 import { startServer } from './server.js';
 import { Notifier } from './notify.js';
+import { CryptoEngine, cryptoLedgerDefaults, cryptoBrainDefaults } from './crypto/engine.js';
+import { CoinbaseData, SimCandles } from './crypto/data.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -66,35 +68,61 @@ async function dexPrice(mint) {
   return pair ? +pair.priceNative : null;
 }
 
-cfg.solUsd = () => sol.usd;
-const feed = cfg.simulate ? new SimFeed(cfg) : new PumpPortalFeed(log, cfg);
-const ledger = createStore(cfg.dataDir, `ledger-${cfg.mode}.json`, ledgerDefaults(cfg));
-const brain = createStore(cfg.dataDir, `brain-${cfg.simulate ? 'sim' : 'real'}.json`, brainDefaults());
-const broker = cfg.live ? new LiveBroker(cfg, log) : new PaperBroker();
-const hunter = new Hunter(cfg, log);
-const notifier = new Notifier(cfg, log);
-const engine = new Engine({ metaStats, notifier, cfg, feed, market: new Market(), hunter, broker, ledger, brain, sol, log, fetchMeta, dexPrice: cfg.simulate ? null : dexPrice });
+let feed; // meme team only
+const shutdownHooks = [];
+if (cfg.market === 'crypto') {
+  // ---------------- CRYPTO TEAM (major coins on 5-minute candles) ----------------
+  const ledger = createStore(cfg.dataDir, `ledger-crypto-${cfg.mode}.json`, cryptoLedgerDefaults(cfg));
+  const brain = createStore(cfg.dataDir, `brain-crypto${cfg.simulate ? '-sim' : ''}.json`, cryptoBrainDefaults(cfg));
+  const notifier = new Notifier(cfg, log);
+  const data = cfg.simulate ? new SimCandles(cfg.crypto.candleSec) : new CoinbaseData(log, cfg.crypto.candleSec);
+  const engine = new CryptoEngine({ cfg, data, ledger, brain, log, notifier });
+  log(`Trio Trader CRYPTO team starting (${cfg.mode.toUpperCase()}, practice money in USD). Meme-coin team is paused; its record is kept.`);
+  log(`Prices: ${cfg.simulate ? 'simulated' : 'Coinbase public candles'} · ${engine.coins.size} coins · $${cfg.crypto.tradeSize} per trade · stop loss ${(cfg.crypto.stopLoss * 100).toFixed(1)}%`);
+  if (notifier.enabled) notifier.send('Crypto team started (practice money). WhatsApp alerts are on.', { important: true });
+  engine.start();
+  setInterval(() => {
+    const c = engine.L.counters, nb = c.notBuy || {};
+    log(`status: ${c.evaluated} chart checks, ${c.deals} deals, ${engine.L.positions.length} open, balance $${engine.equityNow().toFixed(2)} | said no: scout ${nb.scout || 0}, hunter ${nb.hunter || 0}, professor ${nb.professor || 0} | brain learned from ${engine.learner.n} | data calls ${data.stats.calls}, errors ${data.stats.errors}`);
+  }, 10 * 60_000);
+  startServer({ cfg, engine, log, htmlPath: path.join(here, '..', 'public', 'index.html') });
+  shutdownHooks.push(() => { engine.persist(); ledger.saveNow(); brain.saveNow(); });
+} else {
+  startMeme();
+}
 
-log(`Trio Trader starting in ${cfg.mode.toUpperCase()} mode`);
-log(`Hunter reads X using: ${hunter.source}`);
-log(`Trade data from: ${feed.poller ? 'DexScreener (free)' : cfg.simulate ? 'simulator' : 'PumpPortal (paid per message)'}`);
-if (cfg.live && !cfg.pumpPortalKey) log('LIVE_TRADING is on but PUMPPORTAL_API_KEY is missing: no trades will be placed.');
-if (cfg.live) log(`REAL MONEY: ${cfg.tradeSizeSol} SOL per trade, max ${cfg.maxOpen} open, daily loss limit ${cfg.dailyLossLimitSol} SOL`);
-if (notifier.enabled) { notifier.send(`Started in ${cfg.mode.toUpperCase()} mode. WhatsApp alerts are on.`, { important: true }); log('WhatsApp alerts on'); }
-if (!cfg.password) log('Tip: set DASHBOARD_PASSWORD to enable the pause / close buttons.');
+function startMeme() {
+  cfg.solUsd = () => sol.usd;
+  feed = cfg.simulate ? new SimFeed(cfg) : new PumpPortalFeed(log, cfg);
+  const ledger = createStore(cfg.dataDir, `ledger-${cfg.mode}.json`, ledgerDefaults(cfg));
+  const brain = createStore(cfg.dataDir, `brain-${cfg.simulate ? 'sim' : 'real'}.json`, brainDefaults());
+  const broker = cfg.live ? new LiveBroker(cfg, log) : new PaperBroker();
+  const hunter = new Hunter(cfg, log);
+  const notifier = new Notifier(cfg, log);
+  const engine = new Engine({ metaStats, notifier, cfg, feed, market: new Market(), hunter, broker, ledger, brain, sol, log, fetchMeta, dexPrice: cfg.simulate ? null : dexPrice });
 
-engine.start();
-setInterval(() => {
-  const c = engine.L.counters, nb = c.notBuy || {};
-  log(`status: ${c.seen} coins seen, ${c.evaluated} checks, ${c.deals} deals, ${engine.L.positions.length} open | said no: scout ${nb.scout || 0}, hunter ${nb.hunter || 0}, professor ${nb.professor || 0} | coin links loaded ${metaStats.ok}, failed ${metaStats.failed} | brain learned from ${engine.learner.n}${feed.poller ? ` | DexScreener calls ${feed.poller.stats.calls}, coins found ${feed.poller.stats.found}, errors ${feed.poller.stats.errors}` : ''}`);
-}, 10 * 60_000);
-feed.start();
-if (!cfg.simulate) { refreshSol(); setInterval(refreshSol, 5 * 60_000); }
-startServer({ cfg, engine, log, htmlPath: path.join(here, '..', 'public', 'index.html') });
+  log(`Trio Trader starting in ${cfg.mode.toUpperCase()} mode`);
+  log(`Hunter reads X using: ${hunter.source}`);
+  log(`Trade data from: ${feed.poller ? 'DexScreener (free)' : cfg.simulate ? 'simulator' : 'PumpPortal (paid per message)'}`);
+  if (cfg.live && !cfg.pumpPortalKey) log('LIVE_TRADING is on but PUMPPORTAL_API_KEY is missing: no trades will be placed.');
+  if (cfg.live) log(`REAL MONEY: ${cfg.tradeSizeSol} SOL per trade, max ${cfg.maxOpen} open, daily loss limit ${cfg.dailyLossLimitSol} SOL`);
+  if (notifier.enabled) { notifier.send(`Started in ${cfg.mode.toUpperCase()} mode. WhatsApp alerts are on.`, { important: true }); log('WhatsApp alerts on'); }
+  if (!cfg.password) log('Tip: set DASHBOARD_PASSWORD to enable the pause / close buttons.');
+
+  engine.start();
+  setInterval(() => {
+    const c = engine.L.counters, nb = c.notBuy || {};
+    log(`status: ${c.seen} coins seen, ${c.evaluated} checks, ${c.deals} deals, ${engine.L.positions.length} open | said no: scout ${nb.scout || 0}, hunter ${nb.hunter || 0}, professor ${nb.professor || 0} | coin links loaded ${metaStats.ok}, failed ${metaStats.failed} | brain learned from ${engine.learner.n}${feed.poller ? ` | DexScreener calls ${feed.poller.stats.calls}, coins found ${feed.poller.stats.found}, errors ${feed.poller.stats.errors}` : ''}`);
+  }, 10 * 60_000);
+  feed.start();
+  if (!cfg.simulate) { refreshSol(); setInterval(refreshSol, 5 * 60_000); }
+  startServer({ cfg, engine, log, htmlPath: path.join(here, '..', 'public', 'index.html') });
+  shutdownHooks.push(() => { engine.persist(); ledger.saveNow(); brain.saveNow(); });
+}
 
 const shutdown = () => {
   log('saving and shutting down');
-  try { engine.persist(); ledger.saveNow(); brain.saveNow(); } catch (e) { log('save failed', e.message); }
+  for (const h of shutdownHooks) { try { h(); } catch (e) { log('save failed', e.message); } }
   process.exit(0);
 };
 process.on('SIGTERM', shutdown);

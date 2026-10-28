@@ -24,6 +24,19 @@ A meme coin trading bot for **pump.fun** run by three agents, with a live dashbo
 
 ---
 
+
+## Two teams: crypto (default) and meme coins
+
+Set `MARKET` in Render's Environment:
+- `MARKET=crypto` (default): the team trades **major coins** (Bitcoin, Ethereum, Solana, XRP, Dogecoin, Cardano, Avalanche, Chainlink, Litecoin, Bitcoin Cash, Polkadot, Sui) on **5-minute candles** from Coinbase's free public prices, with practice money in US dollars.
+  - **Scout** reads each coin's chart: trend (EMA 20 vs 50), last 30 minutes, breakout of the 2-hour high, volume, RSI.
+  - **Hunter** reads the whole market's mood: the Crypto Fear & Greed Index, Bitcoin's trend, and whether the coin is stronger than Bitcoin.
+  - **Professor** checks risk (too jumpy, already up a lot today) and asks the learned model; final call.
+  - Practice settings: `START_BALANCE_USD=100`, `TRADE_SIZE_USD=20`, `CRYPTO_MAX_OPEN=3`, `DAILY_LOSS_LIMIT_USD=8`, take profit `CRYPTO_TAKE_PROFIT_PCT=2`, stop loss `CRYPTO_STOP_LOSS_PCT=1.5` (the tuner never changes your stop loss), fees `CRYPTO_FEE_PCT=0.1` per side plus `CRYPTO_SLIPPAGE_PCT=0.05`. Pick which coins with `CRYPTO_COINS=BTC,ETH,SOL`.
+  - Lessons carried over from the meme-coin run: data slow enough that a few seconds of delay don't matter, fees in every result, bars that can't lock the team out, your stop loss is fixed, and learning from every chart check (shadow trades), not just its own trades.
+  - Fee warning for real trading later: 0.1% per side is typical on Binance, OKX or Bybit. Some apps charge 0.5% to 1.5%, which would wipe out a 2% profit target.
+- `MARKET=meme`: the pump.fun meme-coin team. Its practice record and brain are kept separately and pick up where they left off.
+
 ## Put it on Railway (about 10 minutes)
 
 ### 1. Get the code onto GitHub

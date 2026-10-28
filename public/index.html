@@ -138,7 +138,7 @@ h1,h2,h3{font-family:var(--display);margin:0;letter-spacing:.005em;text-wrap:bal
 @keyframes jump{50%{transform:translateY(-18px)}}
 
 /* council strip */
-.council{min-height:11rem;align-content:flex-start;display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;padding:10px 14px;border-radius:12px;background:var(--bg);border:1px dashed var(--line)}
+.council{min-height:3.6rem;align-content:flex-start;display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;padding:10px 14px;border-radius:12px;background:var(--bg);border:1px dashed var(--line)}
 .council .label{font:600 .7rem var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
 .council .coin{font:700 1rem var(--mono)}
 .chips{display:flex;gap:6px}
@@ -253,6 +253,7 @@ footer{color:var(--muted);font-size:.82rem;max-width:80ch}
   .grid2{grid-template-columns:minmax(0,1fr)}
 }
 @media (max-width:760px){
+  .council{min-height:11rem}
   .agents{grid-template-columns:minmax(0,1fr)}
   .agent{grid-template-columns:110px minmax(0,1fr);column-gap:12px;align-items:start}
   .art{grid-row:span 3;height:104px}
@@ -317,7 +318,7 @@ footer{color:var(--muted);font-size:.82rem;max-width:80ch}
             </g>
           </svg>
         </div>
-        <div class="who"><h2>Scout</h2><p>Watches every pump.fun launch</p></div>
+        <div class="who"><h2>Scout</h2><p id="scoutRole">Watches every pump.fun launch</p></div>
         <div class="bubble"><span class="sym" id="sym-scout">—</span><span id="say-scout">Warming up. Waiting for the first coins…</span></div>
         <div class="foot"><span class="vote" id="vote-scout">—</span><span class="acc" id="acc-scout">No calls checked yet</span></div>
       </article>
@@ -372,7 +373,7 @@ footer{color:var(--muted);font-size:.82rem;max-width:80ch}
             </g>
           </svg>
         </div>
-        <div class="who"><h2>Professor</h2><p>Reads on-chain data, makes the call</p></div>
+        <div class="who"><h2>Professor</h2><p id="profRole">Reads on-chain data, makes the call</p></div>
         <div class="bubble"><span class="sym" id="sym-professor">—</span><span id="say-professor">Opening the books…</span></div>
         <div class="foot"><span class="vote" id="vote-professor">—</span><span class="acc" id="acc-professor">No calls checked yet</span></div>
       </article>
@@ -394,7 +395,7 @@ footer{color:var(--muted);font-size:.82rem;max-width:80ch}
     <div class="kpi"><span>Win rate</span><b id="kWin">—</b><small id="kWinSub">no trades yet</small></div>
     <div class="kpi"><span>Today</span><b id="kToday">—</b><small id="kTodaySub">profit today</small></div>
     <div class="kpi"><span>Brain accuracy</span><b id="kBrain">—</b><small id="kBrainSub">learning…</small></div>
-    <div class="kpi"><span>Coins scanned</span><b id="kSeen">—</b><small id="kSeenSub">—</small></div>
+    <div class="kpi"><span id="kSeenLabel">Coins scanned</span><b id="kSeen">—</b><small id="kSeenSub">—</small></div>
   </section>
 
   <section class="grid2">
@@ -439,7 +440,7 @@ footer{color:var(--muted);font-size:.82rem;max-width:80ch}
     <div class="panel">
       <div class="panel-head"><h3>Radar</h3><span class="hint">Latest coins the team judged</span></div>
       <div class="tablewrap"><table>
-        <thead><tr><th>Coin</th><th class="num">Age</th><th class="num">Mkt cap</th><th>Votes</th><th>Result</th></tr></thead>
+        <thead><tr><th>Coin</th><th class="num" id="rC1">Age</th><th class="num" id="rC2">Mkt cap</th><th>Votes</th><th>Result</th></tr></thead>
         <tbody id="radar"><tr><td colspan="5" class="muted">Waiting for coins…</td></tr></tbody>
       </table></div>
     </div>
@@ -482,8 +483,10 @@ const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
 let S = null, lastShown = 0, holdUntil = 0;
 const radarItems = [];
 
-const sol = (v, d = 3) => (v == null || !isFinite(v) ? '—' : `${(+v).toFixed(d)} SOL`);
-const sgnSol = (v, d = 3) => (v == null || !isFinite(v) ? '—' : `${v >= 0 ? '+' : ''}${(+v).toFixed(d)} SOL`);
+const isUsd = () => S?.unit === 'USD';
+const pc = (v) => (v * 100 < 5 && Math.round(v * 1000) % 10 ? (v * 100).toFixed(1) : Math.round(v * 100)) + '%';
+const sol = (v, d = 3) => (v == null || !isFinite(v) ? '—' : isUsd() ? `$${(+v).toFixed(2)}` : `${(+v).toFixed(d)} SOL`);
+const sgnSol = (v, d = 3) => (v == null || !isFinite(v) ? '—' : isUsd() ? `${v >= 0 ? '+' : '-'}$${Math.abs(+v).toFixed(2)}` : `${v >= 0 ? '+' : ''}${(+v).toFixed(d)} SOL`);
 const pct = (v, d = 1) => (v == null || !isFinite(v) ? '—' : `${v >= 0 ? '+' : ''}${(v * 100).toFixed(d)}%`);
 const pctPlain = (v) => (v == null || !isFinite(v) ? '—' : `${Math.round(v * 100)}%`);
 const usd = (v) => (v == null || !isFinite(v) ? '—' : v >= 1e6 ? `$${(v / 1e6).toFixed(2)}M` : v >= 1e3 ? `$${(v / 1e3).toFixed(1)}K` : `$${Math.round(v)}`);
@@ -525,7 +528,7 @@ function showCouncil(item) {
   }, reduced ? 0 : i * 380));
   setTimeout(() => {
     $('cCoin').textContent = `$${item.symbol}`;
-    $('cMeta').textContent = `${item.age}s old · ${usd(item.mcapUsd)} · ${item.buyers} buyers`;
+    $('cMeta').textContent = item.meta || `${item.age}s old · ${usd(item.mcapUsd)} · ${item.buyers} buyers`;
     [['cS', 'scout'], ['cH', 'hunter'], ['cP', 'professor']].forEach(([id, a]) => { $(id).className = 'chip ' + item.votes[a]; });
     const v = $('cVerdict');
     v.className = 'verdict ' + (item.decision === 'bought' ? 'bought' : '');
@@ -567,16 +570,20 @@ function renderTop() {
   const m = { sim: ['sim', 'Simulation'], paper: ['warn', 'Practice money'], live: ['danger', 'Real money'] }[S.mode];
   mp.className = 'pill ' + m[0]; mp.lastChild.textContent = m[1] + (S.paused ? ' · paused' : '');
   const fp = $('feedPill');
-  const f = { live: ['live', 'pump.fun live'], simulated: ['sim', 'Simulated feed'], connecting: ['warn', 'Connecting'], reconnecting: ['warn', 'Reconnecting'] }[S.feed] || ['warn', S.feed];
+  const f = { live: ['live', S.labels?.feedLive || 'pump.fun live'], simulated: ['sim', 'Simulated feed'], connecting: ['warn', 'Connecting'], reconnecting: ['warn', 'Reconnecting'] }[S.feed] || ['warn', S.feed];
   fp.className = 'pill ' + f[0]; fp.lastChild.textContent = f[1];
   $('upPill').textContent = 'Up ' + dur((S.now - S.startedAt) / 1000);
-  $('solPill').textContent = `SOL $${(+S.solUsd).toFixed(0)}`;
-  $('hunterSrc').textContent = `Reads X via ${S.hunterSource}`;
+  $('solPill').textContent = S.labels?.topPill || `SOL $${(+S.solUsd).toFixed(0)}`;
+  $('hunterSrc').textContent = S.labels?.hunterRole || `Reads X via ${S.hunterSource}`;
+  if (S.labels) {
+    $('scoutRole').textContent = S.labels.scoutRole; $('profRole').textContent = S.labels.professorRole;
+    $('rC1').textContent = S.labels.radarC1; $('rC2').textContent = S.labels.radarC2; $('kSeenLabel').textContent = S.labels.kSeen;
+  }
   $('btnPause').textContent = S.paused ? 'Resume trading' : 'Pause trading';
 }
 function renderKpis() {
   $('kBal').textContent = sol(S.equity);
-  $('kBalUsd').textContent = `≈ ${usd(S.equity * S.solUsd)}` + (S.wallet != null ? ` · wallet ${sol(S.wallet)}` : '');
+  $('kBalUsd').textContent = isUsd() ? `started with ${sol(S.startBalance)}` : `≈ ${usd(S.equity * S.solUsd)}` + (S.wallet != null ? ` · wallet ${sol(S.wallet)}` : '');
   $('kPnl').textContent = sgnSol(S.pnl); $('kPnl').className = cls(S.pnl);
   $('kPnlPct').textContent = `${pct(S.pnlPct)} since start`;
   const st = S.stats;
@@ -586,7 +593,7 @@ function renderKpis() {
   $('kBrain').textContent = S.learning.accuracy == null ? '—' : pctPlain(S.learning.accuracy);
   $('kBrainSub').textContent = `learned from ${S.learning.samples} coins`;
   $('kSeen').textContent = S.counters.seen.toLocaleString();
-  $('kSeenSub').textContent = `${S.counters.evaluated.toLocaleString()} judged · ${S.counters.deals} deals`;
+  $('kSeenSub').textContent = S.labels?.kSeenSub || `${S.counters.evaluated.toLocaleString()} judged · ${S.counters.deals} deals`;
   for (const a of AG) {
     const g = S.agents[a];
     $('acc-' + a).innerHTML = g.calls ? `Right <b>${pctPlain(g.accuracy)}</b> of ${g.calls} calls` : 'No calls checked yet';
@@ -601,7 +608,7 @@ const lastHtml = {};
 function setHtml(id, html) { if (lastHtml[id] === html) return; lastHtml[id] = html; $(id).innerHTML = html; }
 function renderPositions(flashId) {
   const box = $('positions');
-  if (!S.positions.length) { setHtml('positions', '<div class="empty">No open trades. The team is waiting for all three to agree.</div>'); return; }
+  if (!S.positions.length) { setHtml('positions', `<div class="empty">${esc(S.labels?.empty || 'No open trades. The team is waiting for all three to agree.')}</div>`); return; }
   const lo = -S.config.stopLoss, hi = S.config.takeProfit, span = hi - lo;
   const x = (r) => Math.max(0, Math.min(100, ((r - lo) / span) * 100));
   lastHtml.positions = null;
@@ -619,7 +626,7 @@ function renderRadar(freshMint) {
   const rows = radarItems.slice(0, 14);
   $('radar').innerHTML = rows.map((r) => {
     const res = r.decision === 'bought' ? 'Bought' : r.decision === 'blocked' ? 'Agreed (blocked)' : r.decision === 'failed' ? 'Trade failed' : 'Passed';
-    return `<tr class="${r.mint === freshMint ? 'fresh' : ''}"><td><b>$${esc(r.symbol)}</b></td><td class="num">${r.age}s</td><td class="num">${usd(r.mcapUsd)}</td>
+    return `<tr class="${r.mint === freshMint ? 'fresh' : ''}"><td><b>$${esc(r.symbol)}</b></td><td class="num">${r.c1 != null ? esc(r.c1) : r.age + 's'}</td><td class="num">${r.c2 != null ? esc(r.c2) : usd(r.mcapUsd)}</td>
       <td><span class="mini">${AG.map((a) => `<i class="${r.votes[a]}" title="${NAME[a]}: ${VOTE_TXT[r.votes[a]]}">${a[0].toUpperCase()}</i>`).join('')}</span></td>
       <td class="res ${r.decision}">${res}</td></tr>`;
   }).join('') + '<tr class="pad"><td colspan="5">&nbsp;</td></tr>'.repeat(14 - rows.length);
@@ -678,7 +685,7 @@ function renderAnalysis() {
   const r = A.rule, t = A.exitTune, wf = A.walkForward;
   const rows = [];
   if (A.breaker) rows.push(`<div class="tune-row alert"><span>Circuit breaker: ${esc(A.breaker.why)}</span><b>buying again at ${new Date(A.breaker.until).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</b></div>`);
-  rows.push(`<div class="tune-row"><span>Sell rule ${A.ruleTuned ? '(tuned by the bot)' : '(your settings)'}</span><b>+${Math.round(r.takeProfit * 100)}% / -${Math.round(r.stopLoss * 100)}% / trail ${Math.round(r.trailing * 100)}% / ${r.maxHoldMin}m</b></div>`);
+  rows.push(`<div class="tune-row"><span>Sell rule ${A.ruleTuned ? '(tuned by the bot)' : '(your settings)'}</span><b>+${pc(r.takeProfit)} / -${pc(r.stopLoss)} / trail ${pc(r.trailing)} / ${r.maxHoldMin >= 120 ? (r.maxHoldMin / 60).toFixed(0) + 'h' : r.maxHoldMin + 'm'}</b></div>`);
   rows.push(t ? `<div class="tune-row"><span>Last tuning on ${t.paths} coins: best rule ${t.accepted ? 'adopted' : 'not better on newest coins, kept current'}</span><b>${pct(t.testAvg)} vs ${pct(t.currentTestAvg)}</b></div>` : `<div class="tune-row"><span>Sell-rule tuning starts after 90 recorded coins</span><b>${A.paths} so far</b></div>`);
   rows.push(wf.ready ? `<div class="tune-row"><span>Brain on newer vs older coins</span><b>${pctPlain(wf.newer)} vs ${pctPlain(wf.older)} · ${wf.trend}</b></div>` : `<div class="tune-row"><span>Walk-forward check needs 80 finished coins</span><b>${wf.have} so far</b></div>`);
   rows.push(A.alerts ? '<div class="tune-row"><span>WhatsApp alerts</span><b>on</b></div>' : '<div class="tune-row"><span>WhatsApp alerts</span><b>off: add WHATSAPP_PHONE and WHATSAPP_APIKEY</b></div>');
@@ -692,13 +699,13 @@ function renderAnalysis() {
 function renderSettings() {
   const c = S.config;
   const items = [
-    ['Each trade', sol(c.tradeSizeSol, 3)], ['Take profit at', pct(c.takeProfit, 0)], ['Stop loss at', pct(-c.stopLoss, 0)],
-    ['Trailing stop', `${Math.round(c.trailing * 100)}% from the top`], ['Longest hold', `${c.maxHoldMin} min`], ['Open trades at once', c.maxOpen],
+    ['Each trade', sol(c.tradeSizeSol, 3)], ['Take profit at', pct(c.takeProfit, isUsd() ? 1 : 0)], ['Stop loss at', pct(-c.stopLoss, isUsd() ? 1 : 0)],
+    ['Trailing stop', `${pc(c.trailing)} from the top`], ['Longest hold', c.maxHoldMin >= 120 ? `${(c.maxHoldMin / 60).toFixed(0)} hours` : `${c.maxHoldMin} min`], ['Open trades at once', c.maxOpen],
     ['Stop for the day after losing', sol(c.dailyLossLimitSol, 2)], ['Buy rule', 'All 3 agents say BUY'], ['Sell rule', S.analysis?.ruleTuned ? 'Tuned by the bot' : 'Your settings'],
   ];
   $('settings').innerHTML = items.map(([k, v]) => `<div class="setting"><span>${k}</span><b>${esc(v)}</b></div>`).join('');
   $('ctlHint').textContent = S.controlsEnabled ? 'Enter the dashboard password to pause the team or close every trade.' : 'Buttons are off until DASHBOARD_PASSWORD is set in Railway Variables.';
-  const foot = { live: 'REAL MONEY MODE. Trades use your PumpPortal wallet. Most new meme coins lose almost all their value within hours.', paper: 'Practice money: every trade is simulated at real pump.fun prices with fees and delay included. No real money moves.', sim: 'Simulation: the coins and prices on this screen are made up, for testing only.' };
+  const foot = S.market === 'crypto' ? { paper: 'Practice money: the crypto team trades Bitcoin, Ethereum and other major coins at real Coinbase prices, with 0.1% fees and slippage included. No real money moves.', sim: 'Simulation: prices on this screen are made up, for testing only.' } : { live: 'REAL MONEY MODE. Trades use your PumpPortal wallet. Most new meme coins lose almost all their value within hours.', paper: 'Practice money: every trade is simulated at real pump.fun prices with fees and delay included. No real money moves.', sim: 'Simulation: the coins and prices on this screen are made up, for testing only.' };
   $('foot').textContent = foot[S.mode] + ' Judge the team by its record over weeks, not one good day.';
 }
 
@@ -737,7 +744,7 @@ function hex(name) { // canvas gradients need a hex color
 function renderCharts() {
   const eq = (S.equitySeries || []).map((p) => ({ x: p.t, y: p.v }));
   if (eq.length) eq.push({ x: S.now, y: S.equity });
-  lineChart($('eqChart'), eq, { color: hex('--gain'), base: S.startBalance, fmt: (v) => v.toFixed(3), emptyText: 'The chart fills in as the team trades.' });
+  lineChart($('eqChart'), eq, { color: hex('--gain'), base: S.startBalance, fmt: (v) => (isUsd() ? '$' + v.toFixed(2) : v.toFixed(3)), emptyText: 'The chart fills in as the team trades.' });
   const lc = (S.learning.curve || []).filter((p) => p.acc != null).map((p) => ({ x: p.t, y: p.acc }));
   lineChart($('learnChart'), lc, { color: hex('--prof'), base: 0.5, lo: 0.3, hi: 0.9, fmt: (v) => Math.round(v * 100) + '%', emptyText: 'Fills in after the first coins are finished.' });
 }

@@ -33,11 +33,11 @@ function spearman(x, y) {
  * between a signal and the coin's result. alive: ic_mean > 0.02, ≥55% positive windows, |t| > 2.
  * reversed: ic_mean < −0.02 and |t| > 2 (the signal works backwards). dead: everything else.
  */
-export function signalHealth(samples, windowSize = 40) {
+export function signalHealth(samples, windowSize = 40, names = FEATURE_NAMES) {
   const S = samples.filter((s) => Array.isArray(s.x));
   const windows = Math.floor(S.length / windowSize);
   if (windows < 3) return { ready: false, need: windowSize * 3, have: S.length, signals: [] };
-  const signals = FEATURE_NAMES.map((name, i) => {
+  const signals = names.map((name, i) => {
     const ics = [];
     for (let w = 0; w < windows; w++) {
       const chunk = S.slice(w * windowSize, (w + 1) * windowSize);
@@ -116,7 +116,7 @@ export function replay(path, rule) {
     peak = Math.max(peak, ret);
     if (ret >= rule.takeProfit) return rule.takeProfit; // assume the target fills
     if (ret <= -rule.stopLoss) return ret;
-    if (peak >= 0.15 && peak - ret >= rule.trailing) return ret;
+    if (peak >= (rule.trailStart ?? 0.15) && peak - ret >= rule.trailing) return ret;
     if (sec >= rule.maxHoldMin * 60) return ret;
   }
   return last;
@@ -135,13 +135,13 @@ export function exitGrid(stopLoss, maxTakeProfit) {
  * Pick the sell rule that made the most on older paths, then keep it only if it also beats the
  * current rule on the newest third (walk-forward). Returns null if nothing clearly better.
  */
-export function optimizeExits(paths, current, maxTakeProfit = 0.4) {
+export function optimizeExits(paths, current, maxTakeProfit = 0.4, grid = null) {
   if (paths.length < 90) return null;
   const cut = Math.floor(paths.length * 2 / 3);
   const train = paths.slice(0, cut), test = paths.slice(cut);
   const score = (set, rule) => mean(set.map((p) => replay(p, rule)));
   let best = null;
-  for (const rule of exitGrid(current.stopLoss, maxTakeProfit)) {
+  for (const rule of grid || exitGrid(current.stopLoss, maxTakeProfit)) {
     const s = score(train, rule);
     if (!best || s > best.train) best = { rule, train: s };
   }
@@ -151,11 +151,11 @@ export function optimizeExits(paths, current, maxTakeProfit = 0.4) {
 }
 
 /** Market mood with hysteresis (two thresholds), like Vibe-Trading's regime detector. */
-export function nextMood(prev, winRate) {
+export function nextMood(prev, winRate, t = { hot: 0.38, hotExit: 0.3, cold: 0.2, coldExit: 0.27 }) {
   if (winRate == null) return prev || 'normal';
-  if (prev === 'hot') return winRate < 0.3 ? 'normal' : 'hot';
-  if (prev === 'cold') return winRate > 0.27 ? 'normal' : 'cold';
-  if (winRate >= 0.38) return 'hot';
-  if (winRate <= 0.2) return 'cold';
+  if (prev === 'hot') return winRate < t.hotExit ? 'normal' : 'hot';
+  if (prev === 'cold') return winRate > t.coldExit ? 'normal' : 'cold';
+  if (winRate >= t.hot) return 'hot';
+  if (winRate <= t.cold) return 'cold';
   return 'normal';
 }

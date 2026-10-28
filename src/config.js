@@ -6,12 +6,35 @@ const bool = (k, d) => { const v = env[k]; if (v === undefined || v === '') retu
 const simulate = bool('SIMULATE', false);
 const live = !simulate && bool('LIVE_TRADING', false);
 
+const market = (env.MARKET || 'crypto').toLowerCase(); // 'crypto' (major coins) or 'meme' (pump.fun)
+
 const cfg = {
+  market,
+  crypto: {
+    simulate,
+    candleSec: num('CANDLE_SECONDS', simulate ? 3 : 300),
+    pollSec: num('CRYPTO_POLL_SECONDS', simulate ? 1 : 30),
+    coins: env.CRYPTO_COINS ? env.CRYPTO_COINS.split(',').map((s) => s.trim().toUpperCase()).map((s) => (s.includes('-') ? s : s + '-USD')) : null,
+    startBalance: num('START_BALANCE_USD', 100),
+    tradeSize: num('TRADE_SIZE_USD', 20),
+    maxOpen: num('CRYPTO_MAX_OPEN', 3),
+    dailyLossLimit: num('DAILY_LOSS_LIMIT_USD', 8),
+    fee: num('CRYPTO_FEE_PCT', 0.1) / 100,          // per side; 0.1% is typical on Binance/OKX/Bybit
+    slippage: num('CRYPTO_SLIPPAGE_PCT', 0.05) / 100,
+    takeProfit: num('CRYPTO_TAKE_PROFIT_PCT', 2) / 100,
+    stopLoss: num('CRYPTO_STOP_LOSS_PCT', 1.5) / 100, // never changed by the tuner
+    trailing: num('CRYPTO_TRAILING_PCT', 0.8) / 100,
+    trailStart: num('CRYPTO_TRAIL_START_PCT', 0.6) / 100,
+    maxHoldMin: num('CRYPTO_MAX_HOLD_MINUTES', 360),
+    maxTakeProfit: num('CRYPTO_MAX_TAKE_PROFIT_PCT', 4) / 100,
+    maxAtr: num('CRYPTO_MAX_ATR_PCT', 1.2) / 100,
+    maxBars: { scout: num('CRYPTO_MAX_SCOUT_BAR', 0.55), hunter: num('CRYPTO_MAX_HUNTER_BAR', 0.5), professor: num('CRYPTO_MAX_PROFESSOR_BAR', 0.5) },
+  },
   port: num('PORT', 3000),
   dataDir: env.DATA_DIR || './data',
   simulate,
   live,
-  mode: simulate ? 'sim' : live ? 'live' : 'paper',
+  mode: simulate ? 'sim' : market === 'crypto' ? 'paper' : live ? 'live' : 'paper',
 
   // Live trading (off by default) — PumpPortal "Lightning" trade API
   pumpPortalKey: env.PUMPPORTAL_API_KEY || '',
