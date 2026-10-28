@@ -122,3 +122,21 @@ export function shortProfessor(f, s, h, learner, x, maxAtr) {
   const p = learner.predict(x, heuristic);
   return { score: p, critical: risks[0] || '', thought: risks.length ? `Too risky: ${risks[0]}` : `${Math.round(p * 100)}% chance a short profits${learner.n < 150 ? ' (still learning)' : ''}` };
 }
+
+// ---------- GUARDIAN: does not vote. Sizes each trade and watches open trades. ----------
+/** How much to put in: more on confident, calm setups; less on shaky or jumpy ones. */
+export function guardianSize(base, prob, bar, atr, balance, minMult, maxMult) {
+  const conf = clamp((prob - bar) / Math.max(0.05, 1 - bar));            // 0 = just passed, 1 = certain
+  const calm = clamp(0.005 / Math.max(atr, 0.0005), 0.6, 1.2);           // jumpy coin → smaller
+  const mult = Math.max(minMult, Math.min(maxMult, (0.7 + 0.8 * conf) * calm));
+  const size = Math.max(0, Math.min(balance, +(base * mult).toFixed(2)));
+  const why = `${conf > 0.5 ? 'confident' : conf > 0.2 ? 'fairly sure' : 'just passed'}, ${calm < 0.9 ? 'jumpy coin' : calm > 1.05 ? 'calm coin' : 'normal moves'}`;
+  return { size, mult, why };
+}
+
+/** Should an open trade be closed early because the move turned against it? */
+export function guardianTurned(f, side, ret) {
+  if (ret >= 0) return '';
+  if (side === 'short') return f.emaGap > 0 && f.r6 > 0.004 ? `trend turned up (${pct(f.r6)} in 30m)` : '';
+  return f.emaGap < 0 && f.r6 < -0.004 ? `trend turned down (${pct(f.r6)} in 30m)` : '';
+}

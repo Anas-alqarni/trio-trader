@@ -16,8 +16,8 @@ const cfg = {
     pollSec: num('CRYPTO_POLL_SECONDS', simulate ? 1 : 30),
     coins: env.CRYPTO_COINS ? env.CRYPTO_COINS.split(',').map((s) => s.trim().toUpperCase()).map((s) => (s.includes('-') ? s : s + '-USD')) : null,
     startBalance: num('START_BALANCE_USD', 100),
-    tradeSize: num('TRADE_SIZE_USD', 20),
-    maxOpen: num('CRYPTO_MAX_OPEN', 3),
+    tradeSize: num('TRADE_SIZE_USD', 15),
+    maxOpen: num('CRYPTO_MAX_OPEN', 5),
     dailyLossLimit: num('DAILY_LOSS_LIMIT_USD', 8),
     fee: num('CRYPTO_FEE_PCT', 0.1) / 100,          // per side; 0.1% is typical on Binance/OKX/Bybit
     slippage: num('CRYPTO_SLIPPAGE_PCT', 0.05) / 100,
@@ -28,6 +28,8 @@ const cfg = {
     maxHoldMin: num('CRYPTO_MAX_HOLD_MINUTES', 360),
     maxTakeProfit: num('CRYPTO_MAX_TAKE_PROFIT_PCT', 4) / 100,
     maxAtr: num('CRYPTO_MAX_ATR_PCT', 1.2) / 100,
+    guardian: bool('CRYPTO_GUARDIAN', true),               // 4th agent: sizes trades, can close a trade early
+    guardMinMult: num('GUARDIAN_MIN_SIZE', 0.5), guardMaxMult: num('GUARDIAN_MAX_SIZE', 1.5),
     shorts: bool('CRYPTO_SHORTS', true),                    // practice shorts: profit when a coin falls (no leverage)
     fundingPer8h: num('CRYPTO_FUNDING_PCT_8H', 0.01) / 100, // what a short pays to stay open, per 8 hours
     // Super deals: when every slot is full, a coin far above the bars can still get in.

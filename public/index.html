@@ -12,7 +12,7 @@
 :root{
   color-scheme: dark;
   --bg:#0c0e17; --panel:#141826; --panel-2:#1a1f31; --line:#262c44; --ink:#eceaf6; --muted:#8f93b0;
-  --scout:#34c6b0; --hunter:#f0a33a; --prof:#a48bff;
+  --scout:#34c6b0; --hunter:#f0a33a; --prof:#a48bff; --guard:#f2708f;
   --gain:#57d39b; --loss:#ff6d73; --warn:#f0a33a; --shadow:rgba(0,0,0,.35); --eye:#ffffff; --pupil:#141526;
   --display:"Syne","Avenir Next","Segoe UI",sans-serif;
   --body:"Figtree","Segoe UI",system-ui,sans-serif;
@@ -21,12 +21,12 @@
 @media (prefers-color-scheme: light){ :root:not([data-theme="dark"]){
   color-scheme: light;
   --bg:#f3f2f8; --panel:#ffffff; --panel-2:#f0eff7; --line:#dddbe9; --ink:#1b1b2b; --muted:#5d6080;
-  --scout:#139582; --hunter:#c27a12; --prof:#6f52dc; --gain:#138a55; --loss:#d23c45; --warn:#b26b08; --shadow:rgba(30,20,80,.14); --pupil:#1b1b2b;
+  --scout:#139582; --hunter:#c27a12; --prof:#6f52dc; --guard:#c93d64; --gain:#138a55; --loss:#d23c45; --warn:#b26b08; --shadow:rgba(30,20,80,.14); --pupil:#1b1b2b;
 }}
 :root[data-theme="light"]{
   color-scheme: light;
   --bg:#f3f2f8; --panel:#ffffff; --panel-2:#f0eff7; --line:#dddbe9; --ink:#1b1b2b; --muted:#5d6080;
-  --scout:#139582; --hunter:#c27a12; --prof:#6f52dc; --gain:#138a55; --loss:#d23c45; --warn:#b26b08; --shadow:rgba(30,20,80,.14); --pupil:#1b1b2b;
+  --scout:#139582; --hunter:#c27a12; --prof:#6f52dc; --guard:#c93d64; --gain:#138a55; --loss:#d23c45; --warn:#b26b08; --shadow:rgba(30,20,80,.14); --pupil:#1b1b2b;
 }
 *{box-sizing:border-box}
 html,body{margin:0}
@@ -61,12 +61,19 @@ h1,h2,h3{font-family:var(--display);margin:0;letter-spacing:.005em;text-wrap:bal
   radial-gradient(60% 90% at 85% 0%, color-mix(in srgb,var(--prof) 14%,transparent), transparent 70%),
   var(--panel);border:1px solid var(--line);overflow:hidden;display:grid;gap:14px}
 .agents{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.agents.four{grid-template-columns:repeat(4,minmax(0,1fr))}
+@media (max-width:1150px){.agents.four{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.shield{fill:color-mix(in srgb,var(--c) 70%,#ffffff);stroke:color-mix(in srgb,var(--c) 55%,#000);stroke-width:3}
+.shield-mark{fill:none;stroke:color-mix(in srgb,var(--c) 55%,#000);stroke-width:3.5;stroke-linecap:round;stroke-linejoin:round}
+.guard-ring{fill:none;stroke:color-mix(in srgb,var(--c) 45%,transparent);stroke-width:2;stroke-dasharray:6 8;transform-origin:150px 74px;animation:spin 14s linear infinite}
+.agent:nth-child(4) .bob{animation-delay:-.6s} .agent:nth-child(4) .lids rect{animation-delay:-1.2s}
 .agent{--c:var(--scout);position:relative;background:color-mix(in srgb,var(--panel-2) 82%,transparent);border:1px solid var(--line);border-radius:14px;padding:12px 14px 14px;display:grid;gap:8px;min-width:0;transition:border-color .3s, box-shadow .3s}
 .agent.hot{border-color:color-mix(in srgb,var(--c) 70%,transparent);box-shadow:0 0 0 3px color-mix(in srgb,var(--c) 18%,transparent)}
 .art{height:150px;display:flex;justify-content:center;align-items:center;overflow:hidden}
 .art svg{height:150px;width:auto;max-width:100%;display:block}
 .who{display:flex;align-items:baseline;justify-content:space-between;gap:8px;flex-wrap:wrap}
 .who h2{font-size:1.35rem;color:var(--c)}
+.vote.guard{color:var(--guard);border-color:var(--guard)}
 .who p{margin:0;font-size:.8rem;color:var(--muted)}
 .bubble{position:relative;background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:9px 11px;height:5.6rem;font-size:.88rem;line-height:1.35;overflow-wrap:anywhere}
 .bubble > span:last-child{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
@@ -258,7 +265,7 @@ footer{color:var(--muted);font-size:.82rem;max-width:80ch}
 }
 @media (max-width:760px){
   .council{min-height:11rem}
-  .agents{grid-template-columns:minmax(0,1fr)}
+  .agents,.agents.four{grid-template-columns:minmax(0,1fr)}
   .agent{grid-template-columns:110px minmax(0,1fr);column-gap:12px;align-items:start}
   .art{grid-row:span 3;height:104px}
   .art svg{height:104px}
@@ -269,7 +276,7 @@ footer{color:var(--muted);font-size:.82rem;max-width:80ch}
 /* Performance: characters stop moving when you scroll past them or switch apps */
 .stage.idle *, .stage.idle *::before{animation-play-state:paused!important}
 @media (max-width:760px),(pointer:coarse){
-  .chat,.blip,.reticle,.chalk,.visor-eyes,.tassel,.pupils{animation:none!important}
+  .chat,.blip,.reticle,.chalk,.visor-eyes,.tassel,.pupils,.guard-ring{animation:none!important}
   .chat.c1,.blip{opacity:1}
   .chalk{stroke-dashoffset:0}
   .sweep{animation-duration:6s}
@@ -380,6 +387,31 @@ footer{color:var(--muted);font-size:.82rem;max-width:80ch}
         <div class="who"><h2>Professor</h2><p id="profRole">Reads on-chain data, makes the call</p></div>
         <div class="bubble"><span class="sym" id="sym-professor">—</span><span id="say-professor">Opening the books…</span></div>
         <div class="foot"><span class="vote" id="vote-professor">—</span><span class="acc" id="acc-professor">No calls checked yet</span></div>
+      </article>
+      <article class="agent" id="ag-guardian" style="--c:var(--guard)" hidden>
+        <div class="art">
+          <svg viewBox="0 0 220 170" aria-hidden="true">
+            <circle class="guard-ring" cx="150" cy="74" r="48"/>
+            <ellipse class="shadow" cx="82" cy="160" rx="42" ry="6"/>
+            <g class="bob">
+              <path class="blob" d="M42 154 C36 104 50 72 82 72 C114 72 128 104 122 154 Z"/>
+              <path class="belly" d="M60 154 C58 126 68 116 82 116 C96 116 106 126 104 154 Z"/>
+              <path class="accent" d="M48 92 C50 62 114 62 116 92 L110 94 C106 74 58 74 54 94 Z"/>
+              <rect x="79" y="58" width="6" height="16" rx="3" class="accent"/>
+              <g class="eyes">
+                <circle class="eye" cx="70" cy="102" r="9"/><circle class="eye" cx="95" cy="102" r="9"/>
+                <g class="pupils"><circle class="pupil" cx="71" cy="103" r="4.3"/><circle class="pupil" cx="96" cy="103" r="4.3"/></g>
+                <g class="lids"><rect x="60" y="92" width="20" height="20" rx="10"/><rect x="85" y="92" width="20" height="20" rx="10"/></g>
+              </g>
+              <path class="mouth" d="M76 124 Q83 129 90 124"/>
+              <g><path class="shield" d="M150 40 L180 50 C180 82 170 100 150 112 C130 100 120 82 120 50 Z"/><path class="shield-mark" d="M137 74 L147 84 L164 63"/></g>
+              <circle class="hand" cx="122" cy="110" r="7"/>
+            </g>
+          </svg>
+        </div>
+        <div class="who"><h2>Guardian</h2><p>Sizes each trade, protects open ones</p></div>
+        <div class="bubble"><span class="sym" id="sym-guardian">—</span><span id="say-guardian">Standing guard…</span></div>
+        <div class="foot"><span class="vote" id="vote-guardian">—</span><span class="acc" id="acc-guardian">No early exits yet</span></div>
       </article>
     </div>
 
@@ -530,6 +562,14 @@ function showCouncil(item) {
     card.classList.toggle('hot', item.votes[a] === 'buy' || item.votes[a] === 'short');
     setTimeout(() => card.classList.remove('think'), 800);
   }, reduced ? 0 : i * 380));
+  if (item.thoughts.guardian && !$('ag-guardian').hidden) setTimeout(() => {
+    const card = $('ag-guardian');
+    $('sym-guardian').textContent = `$${item.symbol}`;
+    say('guardian', item.thoughts.guardian);
+    const vb = $('vote-guardian'); vb.className = 'vote guard'; vb.textContent = item.guardBadge || 'WATCH';
+    card.classList.remove('think'); void card.offsetWidth; card.classList.add('think');
+    setTimeout(() => card.classList.remove('think'), 800);
+  }, reduced ? 0 : 3 * 380);
   setTimeout(() => {
     $('cCoin').textContent = `$${item.symbol}`;
     $('cMeta').textContent = item.meta || `${item.age}s old · ${usd(item.mcapUsd)} · ${item.buyers} buyers`;
@@ -600,6 +640,9 @@ function renderKpis() {
   $('kBrainSub').textContent = `learned from ${S.learning.samples} coins`;
   $('kSeen').textContent = S.counters.seen.toLocaleString();
   $('kSeenSub').textContent = S.labels?.kSeenSub || `${S.counters.evaluated.toLocaleString()} judged · ${S.counters.deals} deals`;
+  const GD = S.agents.guardian;
+  $('ag-guardian').hidden = !GD; document.querySelector('.agents').classList.toggle('four', !!GD);
+  if (GD) $('acc-guardian').innerHTML = !GD.active ? `Early exits <b>off</b>: they cost ${sol(-GD.saved)}` : GD.exits ? `Early exits ${GD.saved >= 0 ? 'saved' : 'cost'} <b>${sol(Math.abs(GD.saved))}</b> in ${GD.exits}` : (GD.pending ? `${GD.pending} early exit${GD.pending > 1 ? 's' : ''} being checked` : 'No early exits yet');
   for (const a of AG) {
     const g = S.agents[a];
     $('acc-' + a).innerHTML = g.calls ? `Right <b>${pctPlain(g.accuracy)}</b> of ${g.calls} calls` : 'No calls checked yet';
@@ -688,7 +731,7 @@ function renderAnalysis() {
   $('reasons').innerHTML = (rr.length ? rr.map((r) => `<tr><td>${esc(r.reason)}</td><td class="num">${r.count}</td><td class="num">${pctPlain(r.winRate)}</td><td class="num ${cls(r.avgRet)}">${pct(r.avgRet)}</td><td class="num ${cls(r.pnl)}">${sgnSol(r.pnl, 4)}</td></tr>`).join('') : '<tr><td colspan="5" class="muted">No finished trades yet.</td></tr>') + '<tr class="pad"><td colspan="5">&nbsp;</td></tr>'.repeat(6 - Math.max(1, rr.length));
   const mp = $('moodPill');
   mp.className = 'pill ' + (A.mood === 'hot' ? 'hot' : A.mood === 'cold' ? 'cold' : '');
-  mp.textContent = { hot: 'Market hot', cold: 'Market cold · stricter', normal: 'Market normal' }[A.mood] || 'Mood —';
+  mp.textContent = { hot: 'Market hot', cold: S.market === 'crypto' ? 'Market cold' : 'Market cold · stricter', normal: 'Market normal' }[A.mood] || 'Mood —';
   const r = A.rule, t = A.exitTune, wf = A.walkForward;
   const rows = [];
   if (A.breaker) rows.push(`<div class="tune-row alert"><span>Circuit breaker: ${esc(A.breaker.why)}</span><b>buying again at ${new Date(A.breaker.until).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</b></div>`);

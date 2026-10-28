@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events';
 import { Learner } from '../learner.js';
 import { signalHealth, bootstrapEdge, tradeMetrics, walkForward, optimizeExits, nextMood } from '../analytics.js';
 import { COINS } from './data.js';
-import { CRYPTO_FEATURES, cryptoFeatures, cryptoVector, cryptoScout, cryptoHunter, cryptoProfessor, shortScout, shortHunter, shortProfessor } from './agents.js';
+import { CRYPTO_FEATURES, cryptoFeatures, cryptoVector, cryptoScout, cryptoHunter, cryptoProfessor, shortScout, shortHunter, shortProfessor, guardianSize, guardianTurned } from './agents.js';
 
 const AGENTS = ['scout', 'hunter', 'professor'];
 const today = () => new Date().toISOString().slice(0, 10);
@@ -18,6 +18,7 @@ export const cryptoBrainDefaults = (cfg) => ({
   thresholds: { scout: 0.5, hunter: 0.45, professor: 0.5 },
   agents: Object.fromEntries([...AGENTS, 'team'].map((a) => [a, { calls: 0, right: 0, buys: 0, buyWins: 0 }])),
   samples: [], curve: [], labels: 0, paths: [], exitRule: null, exitTune: null, mood: 'normal', recentY: [],
+  guardian: { active: true, exits: 0, saved: 0, helped: 0 },
   shortLearner: null, shortThresholds: { scout: 0.5, hunter: 0.45, professor: 0.5 }, shortTeam: { calls: 0, wins: 0 },
 });
 
@@ -38,6 +39,7 @@ export class CryptoEngine extends EventEmitter {
     this.shortLearner = new Learner(CRYPTO_FEATURES.length, this.B.shortLearner, CRYPTO_FEATURES); // learns when shorts pay
     this.coins = new Map(COINS.filter(([p]) => !this.C.coins || this.C.coins.includes(p)).map(([p, name]) => [p, { product: p, name, symbol: p.split('-')[0], closed: [], lastT: 0, lastShadowT: 0, live: null }]));
     this.shadows = [];
+    this.ghosts = []; // what an early-closed trade would have done without the Guardian
     this.radar = [];
     this.recentScores = { scout: [], hunter: [], professor: [], Sscout: [], Shunter: [], Sprofessor: [] };
     this.startedAt = Date.now();
@@ -130,7 +132,22 @@ export class CryptoEngine extends EventEmitter {
       const held = ((c.t - p.entryT) / this.candleMs) * VSEC;
       const out = this.step(p, c, held, rule, p.side || 'long');
       p.lastRet = p.last ?? p.lastRet; p.peakRet = p.peak;
-      if (out) this.close(p, out.fill, out.reason, held);
+      if (out) { this.close(p, out.fill, out.reason, held); continue; }
+      // Guardian: after 3 candles, close early if the move clearly turned against the trade.
+      if (this.C.guardian && this.B.guardian.active && held >= 3 * VSEC && coin.closed.length >= 130) {
+        const btc = this.coins.get('BTC-USD')?.closed;
+        const why = guardianTurned(cryptoFeatures(coin.closed, btc && btc.length >= 130 ? btc : null, this.fg), p.side || 'long', p.last ?? 0);
+        if (why) {
+          this.ghosts.push({ product: p.mint, side: p.side || 'long', entry: p.entry, entryT: p.entryT, peak: p.peak, cost: p.cost, fill: p.last, symbol: p.symbol });
+          this.close(p, p.last, `Guardian: ${why}`, held);
+        }
+      }
+    }
+    for (const g of [...this.ghosts]) {
+      if (g.product !== coin.product) continue;
+      const held = ((c.t - g.entryT) / this.candleMs) * VSEC;
+      const out = this.step(g, c, held, rule, g.side);
+      if (out) this.resolveGhost(g, out.fill);
     }
     for (const s of [...this.shadows]) {
       if (s.product !== coin.product || c.t <= s.entryT) continue;
@@ -140,6 +157,18 @@ export class CryptoEngine extends EventEmitter {
       if (s.sh && !s.sh.done) { const out = this.step(s.sh, c, held, rule, 'short'); if (out) { s.sh.done = true; s.sh.result = out.fill; } }
       s.lastClose = c.c; s.held = held;
       if (held >= 720 * 60) this.resolveShadow(s);
+    }
+  }
+
+  /** Compare the Guardian's early exit with what the normal rules would have done. */
+  resolveGhost(g, wouldHave) {
+    this.ghosts = this.ghosts.filter((x) => x !== g);
+    const G = this.B.guardian, diff = (g.fill - wouldHave) * g.cost;
+    G.exits++; G.saved += diff; if (diff > 0) G.helped++;
+    if (G.exits >= 20 && G.saved < 0 && G.active) {
+      G.active = false;
+      this.log('Guardian: early exits cost money over 20 tries, turning them off');
+      this.notifier.send(`🛡️ Guardian stopped closing trades early: over ${G.exits} tries it cost $${(-G.saved).toFixed(2)}. He keeps sizing trades.`, { important: true });
     }
   }
 
@@ -182,7 +211,7 @@ export class CryptoEngine extends EventEmitter {
     const superDeal = team && pr.score >= Math.max(pb + this.C.superMargin, this.C.superMinProb) && s.score >= this.C.superMinScout;
     if (team) {
       blocked = this.canOpen(coin, superDeal);
-      if (!blocked) { const extra = this.L.positions.length + this.opening >= this.C.maxOpen; this.open(coin, f, { s, h, pr }, extra); decision = 'bought'; if (extra) pr.thought = `Super deal: ${pr.thought}`; }
+      if (!blocked) { const extra = this.L.positions.length + this.opening >= this.C.maxOpen; this.open(coin, f, { s, h, pr, bar: pb }, extra); decision = 'bought'; if (extra) pr.thought = `Super deal: ${pr.thought}`; }
       else decision = 'blocked';
     }
     // ---- the short council: same three agents, looking for a fall ----
@@ -216,13 +245,16 @@ export class CryptoEngine extends EventEmitter {
       });
     }
     const V = side === 'short' ? S : { s, h, pr };
+    const open = this.L.positions.map((p) => `${p.symbol}${p.side === 'short' ? '↓' : ''} ${(p.lastRet * 100 >= 0 ? '+' : '')}${(p.lastRet * 100).toFixed(1)}%`).join(', ');
+    const guard = decision === 'bought' || decision === 'shorted' ? this.lastGuard : open ? `Watching ${open}` : 'No open trades to protect';
     const item = {
       at: Date.now(), mint: coin.product, symbol: coin.symbol, name: coin.name, age: 0, buyers: 0, mcapUsd: 0,
       c1: fmtPrice(f.price), c2: `${f.r288 >= 0 ? '+' : ''}${(f.r288 * 100).toFixed(1)}%`,
       meta: `${fmtPrice(f.price)} · 24h ${f.r288 >= 0 ? '+' : ''}${(f.r288 * 100).toFixed(1)}% · RSI ${f.rsi.toFixed(0)}`,
       side, votes: { scout: V.s.vote, hunter: V.h.vote, professor: V.pr.vote },
       scores: { scout: +V.s.score.toFixed(2), hunter: +V.h.score.toFixed(2), professor: +V.pr.score.toFixed(2) },
-      thoughts: side === 'short' ? { scout: `Short? ${V.s.thought}`, hunter: `Short? ${V.h.thought}`, professor: `Short? ${V.pr.thought}` } : { scout: s.thought, hunter: h.thought, professor: pr.thought }, decision, blocked,
+      thoughts: side === 'short' ? { scout: `Short? ${V.s.thought}`, hunter: `Short? ${V.h.thought}`, professor: `Short? ${V.pr.thought}`, guardian: guard } : { scout: s.thought, hunter: h.thought, professor: pr.thought, guardian: guard }, decision, blocked,
+      guardBadge: decision === 'bought' || decision === 'shorted' ? `${this.L.positions[this.L.positions.length - 1]?.sizeMult ?? 1}x` : this.L.positions.length ? 'WATCH' : 'IDLE',
     };
     this.radar.unshift(item); if (this.radar.length > 40) this.radar.length = 40;
     this.emit('radar', item);
@@ -235,16 +267,20 @@ export class CryptoEngine extends EventEmitter {
     if (this.L.positions.length + this.opening >= limit) return superDeal ? 'even the super-deal slot is full' : 'max open positions';
     if (this.L.daily.pnl <= -this.C.dailyLossLimit) return 'daily loss limit reached';
     if ((this.L.cooldownUntil || 0) > Date.now()) return 'cooling down after losses';
-    if (this.L.balance < this.C.tradeSize) return 'not enough practice balance';
+    if (this.L.balance < this.C.tradeSize * this.C.guardMinMult) return 'not enough practice balance';
     return '';
   }
 
   open(coin, f, v, superDeal = false, side = 'long') {
-    const now = Date.now(), cost = this.C.tradeSize;
+    const now = Date.now();
+    const bar = v.bar ?? this.bar('professor', v.pr.score, side === 'short');
+    const g = this.C.guardian ? guardianSize(this.C.tradeSize, v.pr.score, bar, f.atr, this.L.balance, this.C.guardMinMult, this.C.guardMaxMult) : { size: this.C.tradeSize, mult: 1, why: '' };
+    const cost = g.size;
+    this.lastGuard = `Size $${cost.toFixed(0)} (${g.mult.toFixed(1)}x): ${g.why}`;
     const p = {
       id: `${now}-${coin.symbol}`, mint: coin.product, symbol: coin.symbol, name: coin.name, openedAt: now,
       side, entryT: coin.closed[coin.closed.length - 1].t, entry: f.price, cost, value: cost, peak: 0, peakRet: 0, lastRet: 0, heldSec: 0,
-      thoughts: { scout: v.s.thought, hunter: v.h.thought, professor: v.pr.thought },
+      thoughts: { scout: v.s.thought, hunter: v.h.thought, professor: v.pr.thought, guardian: this.lastGuard }, sizeMult: +g.mult.toFixed(2),
     };
     this.L.balance -= cost;
     this.L.positions.push(p);
@@ -252,7 +288,7 @@ export class CryptoEngine extends EventEmitter {
     if (superDeal) p.superDeal = true;
     this.log(`DEAL crypto ${side === 'short' ? 'SHORT' : 'buy'} ${coin.symbol} $${cost} at ${fmtPrice(f.price)}${superDeal ? ' (super deal, extra slot)' : ''}`);
     this.emit('deal', this.publicPos(p));
-    this.notifier.send(`${superDeal ? '⭐ SUPER DEAL (extra slot) ' : ''}${side === 'short' ? '🔽 Practice SHORT' : '🟢 Practice buy'} ${coin.symbol} $${cost} at ${fmtPrice(f.price)}\nProfessor: ${v.pr.thought}`);
+    this.notifier.send(`${superDeal ? '⭐ SUPER DEAL (extra slot) ' : ''}${side === 'short' ? '🔽 Practice SHORT' : '🟢 Practice buy'} ${coin.symbol} $${cost.toFixed(2)} at ${fmtPrice(f.price)}\nProfessor: ${v.pr.thought}\nGuardian: ${this.lastGuard}`);
     this.ledger.save();
   }
 
@@ -401,6 +437,7 @@ export class CryptoEngine extends EventEmitter {
         hunter: { accuracy: acc('hunter'), calls: A.hunter.calls, threshold: this.B.thresholds.hunter },
         professor: { accuracy: acc('professor'), calls: A.professor.calls, threshold: this.B.thresholds.professor },
         team: { buys: A.team.buys, winRate: A.team.buys ? A.team.buyWins / A.team.buys : null },
+        guardian: this.C.guardian ? { ...this.B.guardian, saved: +this.B.guardian.saved.toFixed(2), pending: this.ghosts.length } : null,
         shortTeam: { calls: this.B.shortTeam.calls, winRate: this.B.shortTeam.calls ? this.B.shortTeam.wins / this.B.shortTeam.calls : null },
       },
       shorts: !!this.C.shorts,
