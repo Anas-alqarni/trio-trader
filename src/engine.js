@@ -414,7 +414,7 @@ export class Engine extends EventEmitter {
       exitTune: this.B.exitTune,
       paths: this.B.paths.length,
       breaker: (this.L.cooldownUntil || 0) > Date.now() ? { until: this.L.cooldownUntil, why: this.L.cooldownWhy } : null,
-      alerts: this.notifier.enabled,
+      alerts: this.notifier.enabled, alertChannel: this.notifier.channel, alertWaiting: !!(this.notifier.tgToken && !this.notifier.tgChat),
     };
     this.analysisCache = { at: Date.now(), data };
     return data;

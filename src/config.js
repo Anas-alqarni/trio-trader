@@ -98,7 +98,11 @@ const cfg = {
   maxDrawdownPct: num('MAX_DRAWDOWN_PCT', 30) / 100,
   cooldownMin: num('COOLDOWN_MINUTES', 60),
 
-  // WhatsApp alerts via CallMeBot (optional)
+  // Telegram alerts (recommended): only the bot token is needed; send /start to your bot
+  telegramToken: env.TELEGRAM_BOT_TOKEN || '',
+  telegramChat: env.TELEGRAM_CHAT_ID || '',
+  alertLevel: (env.ALERTS || env.WHATSAPP_ALERTS || 'all').toLowerCase(), // 'all' or 'important'
+  // WhatsApp alerts via CallMeBot (optional, used only if Telegram isn't set)
   whatsappPhone: env.WHATSAPP_PHONE || '',
   whatsappKey: env.WHATSAPP_APIKEY || '',
   whatsappLevel: (env.WHATSAPP_ALERTS || 'all').toLowerCase(), // 'all' or 'important'

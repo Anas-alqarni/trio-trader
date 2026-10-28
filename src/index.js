@@ -79,7 +79,7 @@ if (cfg.market === 'crypto') {
   const engine = new CryptoEngine({ cfg, data, ledger, brain, log, notifier });
   log(`Trio Trader CRYPTO team starting (${cfg.mode.toUpperCase()}, practice money in USD). Meme-coin team is paused; its record is kept.`);
   log(`Prices: ${cfg.simulate ? 'simulated' : 'Coinbase public candles'} · ${engine.coins.size} coins · $${cfg.crypto.tradeSize} per trade · stop loss ${(cfg.crypto.stopLoss * 100).toFixed(1)}%`);
-  if (notifier.enabled) notifier.send('Crypto team started (practice money). WhatsApp alerts are on.', { important: true });
+  if (notifier.enabled) { notifier.send(`Crypto team started (practice money). ${notifier.channel} alerts are on.`, { important: true }); log(`${notifier.channel} alerts on`); }
   engine.start();
   setInterval(() => {
     const c = engine.L.counters, nb = c.notBuy || {};
@@ -106,7 +106,7 @@ function startMeme() {
   log(`Trade data from: ${feed.poller ? 'DexScreener (free)' : cfg.simulate ? 'simulator' : 'PumpPortal (paid per message)'}`);
   if (cfg.live && !cfg.pumpPortalKey) log('LIVE_TRADING is on but PUMPPORTAL_API_KEY is missing: no trades will be placed.');
   if (cfg.live) log(`REAL MONEY: ${cfg.tradeSizeSol} SOL per trade, max ${cfg.maxOpen} open, daily loss limit ${cfg.dailyLossLimitSol} SOL`);
-  if (notifier.enabled) { notifier.send(`Started in ${cfg.mode.toUpperCase()} mode. WhatsApp alerts are on.`, { important: true }); log('WhatsApp alerts on'); }
+  if (notifier.enabled) { notifier.send(`Started in ${cfg.mode.toUpperCase()} mode. ${notifier.channel} alerts are on.`, { important: true }); log(`${notifier.channel} alerts on`); }
   if (!cfg.password) log('Tip: set DASHBOARD_PASSWORD to enable the pause / close buttons.');
 
   engine.start();
