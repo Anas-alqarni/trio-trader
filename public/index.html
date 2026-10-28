@@ -75,6 +75,10 @@ h1,h2,h3{font-family:var(--display);margin:0;letter-spacing:.005em;text-wrap:bal
 .foot{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
 .vote{font:700 .72rem var(--mono);letter-spacing:.08em;padding:4px 10px;border-radius:999px;border:1px solid var(--line);color:var(--muted);transition:transform .25s}
 .vote.buy{color:var(--gain);border-color:var(--gain);background:color-mix(in srgb,var(--gain) 12%,transparent)}
+.vote.short{color:var(--prof);border-color:var(--prof);background:color-mix(in srgb,var(--prof) 12%,transparent)}
+.chip.short,.mini i.short{border-color:var(--prof);color:var(--prof)}
+.tag-short{font:700 .62rem var(--mono);letter-spacing:.06em;padding:2px 7px;border-radius:999px;border:1px solid var(--prof);color:var(--prof);vertical-align:middle}
+.res.shorted{color:var(--prof)}
 .vote.avoid{color:var(--loss);border-color:var(--loss);background:color-mix(in srgb,var(--loss) 10%,transparent)}
 .vote.wait{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 60%,transparent)}
 .vote.flip{animation:flip .45s ease}
@@ -494,7 +498,7 @@ const dur = (s) => (s < 60 ? `${Math.round(s)}s` : s < 3600 ? `${Math.round(s / 
 const ago = (t) => dur(Math.max(0, (Date.now() - t) / 1000)) + ' ago';
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const cls = (v) => (v > 0 ? 'up' : v < 0 ? 'down' : '');
-const VOTE_TXT = { buy: 'BUY', wait: 'WAIT', avoid: 'NO' };
+const VOTE_TXT = { buy: 'BUY', short: 'SHORT', wait: 'WAIT', avoid: 'NO' };
 const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 
 /* ---------- agents ---------- */
@@ -514,7 +518,7 @@ function setVote(el, v) {
 function showCouncil(item) {
   if (stageEl.classList.contains('idle')) return;
   const now = Date.now();
-  const priority = item.decision !== 'pass' || item.votes.scout === 'buy';
+  const priority = item.decision !== 'pass' || item.votes.scout === 'buy' || item.votes.scout === 'short';
   if (!priority && (now < holdUntil || now - lastShown < 3500)) return;
   lastShown = now; if (priority) holdUntil = now + 4500;
   AG.forEach((a, i) => setTimeout(() => {
@@ -523,7 +527,7 @@ function showCouncil(item) {
     say(a, item.thoughts[a]);
     setVote($('vote-' + a), item.votes[a]);
     card.classList.remove('think'); void card.offsetWidth; card.classList.add('think');
-    card.classList.toggle('hot', item.votes[a] === 'buy');
+    card.classList.toggle('hot', item.votes[a] === 'buy' || item.votes[a] === 'short');
     setTimeout(() => card.classList.remove('think'), 800);
   }, reduced ? 0 : i * 380));
   setTimeout(() => {
@@ -531,30 +535,32 @@ function showCouncil(item) {
     $('cMeta').textContent = item.meta || `${item.age}s old · ${usd(item.mcapUsd)} · ${item.buyers} buyers`;
     [['cS', 'scout'], ['cH', 'hunter'], ['cP', 'professor']].forEach(([id, a]) => { $(id).className = 'chip ' + item.votes[a]; });
     const v = $('cVerdict');
-    v.className = 'verdict ' + (item.decision === 'bought' ? 'bought' : '');
+    v.className = 'verdict ' + (item.decision === 'bought' || item.decision === 'shorted' ? 'bought' : '');
     v.textContent = verdictText(item);
   }, reduced ? 0 : 1150);
 }
 function verdictText(item) {
   if (item.decision === 'bought') return 'All three agree → bought.';
+  if (item.decision === 'shorted') return 'All three agree it will fall → shorted.';
   if (item.decision === 'blocked') return `All three agree, but no trade: ${item.blocked}.`;
   if (item.decision === 'failed') return 'All three agree, but the trade failed.';
-  const no = AG.filter((a) => item.votes[a] !== 'buy').map((a) => `${NAME[a]} says ${item.votes[a] === 'avoid' ? 'no' : 'wait'}`);
+  const yes = item.side === 'short' ? 'short' : 'buy';
+  const no = AG.filter((a) => item.votes[a] !== yes).map((a) => `${NAME[a]} says ${item.votes[a] === 'avoid' ? 'no' : 'wait'}`);
   return `No deal: ${no.join(', ')}.`;
 }
 
 /* ---------- live events ---------- */
 function onDeal(p) {
   const stage = $('stage'), stamp = $('stamp');
-  $('stampTxt').textContent = `Bought $${p.symbol} · ${sol(p.cost, 3)}`;
+  $('stampTxt').textContent = `${p.side === 'short' ? 'Shorted' : 'Bought'} $${p.symbol} · ${sol(p.cost, 3)}`;
   stage.classList.remove('deal'); stamp.classList.remove('show'); void stage.offsetWidth;
   stage.classList.add('deal'); stamp.classList.add('show');
   setTimeout(() => stage.classList.remove('deal'), 1800);
-  toast(`The team bought <b>$${esc(p.symbol)}</b> for ${sol(p.cost)}.`, 'good');
+  toast(`The team ${p.side === 'short' ? 'shorted' : 'bought'} <b>$${esc(p.symbol)}</b> for ${sol(p.cost)}.`, 'good');
   if (S) { S.positions = [...S.positions.filter((x) => x.id !== p.id), p]; renderPositions(p.id); }
 }
 function onExit(t) {
-  toast(`Sold <b>$${esc(t.symbol)}</b> · <span class="${cls(t.pnl)}">${pct(t.ret)} (${sgnSol(t.pnl, 4)})</span> · ${esc(t.reason)}`, t.pnl >= 0 ? 'good' : 'bad');
+  toast(`${t.side === 'short' ? 'Closed short' : 'Sold'} <b>$${esc(t.symbol)}</b> · <span class="${cls(t.pnl)}">${pct(t.ret)} (${sgnSol(t.pnl, 4)})</span> · ${esc(t.reason)}`, t.pnl >= 0 ? 'good' : 'bad');
   if (S) { S.positions = S.positions.filter((x) => x.id !== t.id); S.trades = [t, ...(S.trades || [])].slice(0, 60); renderPositions(); renderTrades(t.id); }
 }
 function toast(html, kind) {
@@ -602,7 +608,8 @@ function renderKpis() {
   $('positions').style.minHeight = `calc(${S.config.maxOpen} * 6.4rem + ${(S.config.maxOpen - 1) * 10}px)`; // room for every slot, so the page never jumps
   $('eqHint').textContent = `started with ${sol(S.startBalance, 2)}`;
   const tm = S.agents.team;
-  $('learnHint').textContent = tm.buys ? `team picks won ${pctPlain(tm.winRate)} of ${tm.buys}` : '';
+  const shT = S.agents.shortTeam;
+  $('learnHint').textContent = (tm.buys ? `buy picks won ${pctPlain(tm.winRate)} of ${tm.buys}` : '') + (shT && shT.calls ? ` · short picks won ${pctPlain(shT.winRate)} of ${shT.calls}` : '');
 }
 const lastHtml = {};
 function setHtml(id, html) { if (lastHtml[id] === html) return; lastHtml[id] = html; $(id).innerHTML = html; }
@@ -615,7 +622,7 @@ function renderPositions(flashId) {
   box.innerHTML = S.positions.map((p) => {
     const r = p.lastRet || 0;
     return `<div class="pos ${p.id === flashId ? 'flash' : ''}">
-      <div class="pos-top"><span><b>$${esc(p.symbol)}</b> ${p.superDeal ? '<span class="st alive">super</span> ' : ''}<span class="muted">${esc(p.name)}</span></span><span class="pos-ret ${cls(r)}">${pct(r)}</span></div>
+      <div class="pos-top"><span><b>$${esc(p.symbol)}</b> ${p.side === 'short' ? '<span class="tag-short">SHORT</span> ' : ''}${p.superDeal ? '<span class="st alive">super</span> ' : ''}<span class="muted">${esc(p.name)}</span></span><span class="pos-ret ${cls(r)}">${pct(r)}</span></div>
       <div class="track"><span class="zero" style="left:${x(0)}%"></span><span class="now" style="left:${x(r)}%;background:${r >= 0 ? 'var(--gain)' : 'var(--loss)'}"></span></div>
       <div class="track-labels"><span>sell at ${pct(lo, 0)}</span><span>${sol(p.value, 4)} · held ${dur(p.heldSec)}</span><span>sell at ${pct(hi, 0)}</span></div>
     </div>`;
@@ -625,7 +632,7 @@ function renderRadar(freshMint) {
   if (!radarItems.length) return;
   const rows = radarItems.slice(0, 14);
   $('radar').innerHTML = rows.map((r) => {
-    const res = r.decision === 'bought' ? 'Bought' : r.decision === 'blocked' ? 'Agreed (blocked)' : r.decision === 'failed' ? 'Trade failed' : 'Passed';
+    const res = r.decision === 'shorted' ? 'Shorted' : r.decision === 'bought' ? 'Bought' : r.decision === 'blocked' ? 'Agreed (blocked)' : r.decision === 'failed' ? 'Trade failed' : 'Passed';
     return `<tr class="${r.mint === freshMint ? 'fresh' : ''}"><td><b>$${esc(r.symbol)}</b></td><td class="num">${r.c1 != null ? esc(r.c1) : r.age + 's'}</td><td class="num">${r.c2 != null ? esc(r.c2) : usd(r.mcapUsd)}</td>
       <td><span class="mini">${AG.map((a) => `<i class="${r.votes[a]}" title="${NAME[a]}: ${VOTE_TXT[r.votes[a]]}">${a[0].toUpperCase()}</i>`).join('')}</span></td>
       <td class="res ${r.decision}">${res}</td></tr>`;
@@ -636,7 +643,7 @@ function renderTrades(freshId) {
   $('histHint').textContent = T.length ? `latest ${Math.min(T.length, 12)}` : '';
   if (!T.length) { $('trades').innerHTML = '<tr><td colspan="6" class="muted">No finished trades yet.</td></tr>' + '<tr class="pad"><td colspan="6">&nbsp;</td></tr>'.repeat(11); return; }
   const tt = T.slice(0, 12);
-  $('trades').innerHTML = tt.map((t) => `<tr class="${t.id === freshId ? 'fresh' : ''}"><td>${ago(t.closedAt)}</td><td><b>$${esc(t.symbol)}</b></td>
+  $('trades').innerHTML = tt.map((t) => `<tr class="${t.id === freshId ? 'fresh' : ''}"><td>${ago(t.closedAt)}</td><td><b>$${esc(t.symbol)}</b>${t.side === 'short' ? ' <span class="tag-short">SHORT</span>' : ''}</td>
     <td class="num ${cls(t.pnl)}">${sgnSol(t.pnl, 4)}</td><td class="num ${cls(t.ret)}">${pct(t.ret)}</td><td class="num">${dur(t.holdSec)}</td><td>${esc(t.reason)}${t.estimated ? ' <span class="muted">(est.)</span>' : ''}</td></tr>`).join('') + '<tr class="pad"><td colspan="6">&nbsp;</td></tr>'.repeat(12 - tt.length);
 }
 function renderLearning() {

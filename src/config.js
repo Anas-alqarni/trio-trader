@@ -28,6 +28,8 @@ const cfg = {
     maxHoldMin: num('CRYPTO_MAX_HOLD_MINUTES', 360),
     maxTakeProfit: num('CRYPTO_MAX_TAKE_PROFIT_PCT', 4) / 100,
     maxAtr: num('CRYPTO_MAX_ATR_PCT', 1.2) / 100,
+    shorts: bool('CRYPTO_SHORTS', true),                    // practice shorts: profit when a coin falls (no leverage)
+    fundingPer8h: num('CRYPTO_FUNDING_PCT_8H', 0.01) / 100, // what a short pays to stay open, per 8 hours
     // Super deals: when every slot is full, a coin far above the bars can still get in.
     superSlots: num('CRYPTO_SUPER_SLOTS', 1),
     superMinProb: num('CRYPTO_SUPER_MIN_PROB', 65) / 100,  // Professor's chance of profit at least this…

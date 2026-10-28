@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events';
 import { Learner } from '../learner.js';
 import { signalHealth, bootstrapEdge, tradeMetrics, walkForward, optimizeExits, nextMood } from '../analytics.js';
 import { COINS } from './data.js';
-import { CRYPTO_FEATURES, cryptoFeatures, cryptoVector, cryptoScout, cryptoHunter, cryptoProfessor } from './agents.js';
+import { CRYPTO_FEATURES, cryptoFeatures, cryptoVector, cryptoScout, cryptoHunter, cryptoProfessor, shortScout, shortHunter, shortProfessor } from './agents.js';
 
 const AGENTS = ['scout', 'hunter', 'professor'];
 const today = () => new Date().toISOString().slice(0, 10);
@@ -18,6 +18,7 @@ export const cryptoBrainDefaults = (cfg) => ({
   thresholds: { scout: 0.5, hunter: 0.45, professor: 0.5 },
   agents: Object.fromEntries([...AGENTS, 'team'].map((a) => [a, { calls: 0, right: 0, buys: 0, buyWins: 0 }])),
   samples: [], curve: [], labels: 0, paths: [], exitRule: null, exitTune: null, mood: 'normal', recentY: [],
+  shortLearner: null, shortThresholds: { scout: 0.5, hunter: 0.45, professor: 0.5 }, shortTeam: { calls: 0, wins: 0 },
 });
 
 /**
@@ -34,10 +35,11 @@ export class CryptoEngine extends EventEmitter {
     this.C = cfg.crypto;
     for (const [k, v] of Object.entries(cryptoBrainDefaults(cfg))) if (this.B[k] === undefined) this.B[k] = v;
     this.learner = new Learner(CRYPTO_FEATURES.length, this.B.learner, CRYPTO_FEATURES);
+    this.shortLearner = new Learner(CRYPTO_FEATURES.length, this.B.shortLearner, CRYPTO_FEATURES); // learns when shorts pay
     this.coins = new Map(COINS.filter(([p]) => !this.C.coins || this.C.coins.includes(p)).map(([p, name]) => [p, { product: p, name, symbol: p.split('-')[0], closed: [], lastT: 0, lastShadowT: 0, live: null }]));
     this.shadows = [];
     this.radar = [];
-    this.recentScores = { scout: [], hunter: [], professor: [] };
+    this.recentScores = { scout: [], hunter: [], professor: [], Sscout: [], Shunter: [], Sprofessor: [] };
     this.startedAt = Date.now();
     this.feedStatus = 'connecting';
     this.lastDataAt = 0;
@@ -54,6 +56,12 @@ export class CryptoEngine extends EventEmitter {
     return this.cfg.autoTuneExits && this.B.exitRule ? { ...base, ...this.B.exitRule, stopLoss: base.stopLoss } : base;
   }
   net(q) { const s = 1 - this.C.slippage, f = 1 - this.C.fee; return q * s * s * f * f - 1; }
+  /** Result of a trade when the price moved from entry to entry*q. A short gains when q falls, and pays funding while open. */
+  netSide(q, side, heldSec = 0) {
+    if (side !== 'short') return this.net(q);
+    const s = 1 - this.C.slippage, f = 1 - this.C.fee;
+    return (2 - q) * s * s * f * f - 1 - this.C.fundingPer8h * (heldSec / 28_800);
+  }
 
   start() {
     let busy = false;
@@ -98,10 +106,12 @@ export class CryptoEngine extends EventEmitter {
 
   // ---------- one closed candle: move open trades and learning trades ----------
   /** Walk low → high → close of a candle against a sell rule. Returns {fill, reason} or null. */
-  step(st, c, heldSec, rule) {
-    for (const [kind, px] of [['low', c.l], ['high', c.h], ['close', c.c]]) {
-      const r = this.net(px / st.entry);
-      if (kind !== 'low') st.peak = Math.max(st.peak, r);
+  step(st, c, heldSec, rule, side = 'long') {
+    // Worst point first (low for a buy, high for a short), so results are never flattered.
+    const order = side === 'short' ? [['worst', c.h], ['best', c.l], ['close', c.c]] : [['worst', c.l], ['best', c.h], ['close', c.c]];
+    for (const [kind, px] of order) {
+      const r = this.netSide(px / st.entry, side, heldSec);
+      if (kind !== 'worst') st.peak = Math.max(st.peak, r);
       if (r <= -rule.stopLoss) return { fill: Math.max(r, -rule.stopLoss - 0.003), reason: 'stop loss' };
       if (r >= rule.takeProfit) return { fill: rule.takeProfit, reason: 'take profit' };
       if (kind === 'close') {
@@ -118,7 +128,7 @@ export class CryptoEngine extends EventEmitter {
     for (const p of [...this.L.positions]) {
       if (p.mint !== coin.product || c.t <= p.entryT) continue;
       const held = ((c.t - p.entryT) / this.candleMs) * VSEC;
-      const out = this.step(p, c, held, rule);
+      const out = this.step(p, c, held, rule, p.side || 'long');
       p.lastRet = p.last ?? p.lastRet; p.peakRet = p.peak;
       if (out) this.close(p, out.fill, out.reason, held);
     }
@@ -127,23 +137,25 @@ export class CryptoEngine extends EventEmitter {
       const held = ((c.t - s.entryT) / this.candleMs) * VSEC;
       for (const px of [c.l, c.h, c.c]) if (s.path.length < 450) s.path.push([held, +this.net(px / s.entry).toFixed(5)]);
       if (!s.done) { const out = this.step(s, c, held, rule); if (out) { s.done = true; s.result = out.fill; } }
+      if (s.sh && !s.sh.done) { const out = this.step(s.sh, c, held, rule, 'short'); if (out) { s.sh.done = true; s.sh.result = out.fill; } }
+      s.lastClose = c.c; s.held = held;
       if (held >= 720 * 60) this.resolveShadow(s);
     }
   }
 
   markPositions(coin) {
     for (const p of this.L.positions) if (p.mint === coin.product && coin.live) {
-      const r = this.net(coin.live / p.entry);
-      p.lastRet = r; p.value = p.cost * (1 + r);
       p.heldSec = Math.round(((Date.now() - p.openedAt) / this.candleMs) * VSEC);
+      const r = this.netSide(coin.live / p.entry, p.side || 'long', p.heldSec);
+      p.lastRet = r; p.value = p.cost * (1 + r);
     }
   }
 
   // ---------- the council ----------
-  bar(agent, score) {
-    const arr = this.recentScores[agent];
+  bar(agent, score, short = false) {
+    const arr = this.recentScores[(short ? 'S' : '') + agent];
     arr.push(score); if (arr.length > 400) arr.shift();
-    let b = Math.min(this.B.thresholds[agent], this.C.maxBars[agent]);
+    let b = Math.min((short ? this.B.shortThresholds : this.B.thresholds)[agent], this.C.maxBars[agent]);
     if (arr.length >= 80) { const s = [...arr].sort((x, y) => x - y); b = Math.min(b, s[Math.floor(s.length * (1 - this.cfg.topPercent))]); }
     return b;
   }
@@ -173,18 +185,44 @@ export class CryptoEngine extends EventEmitter {
       if (!blocked) { const extra = this.L.positions.length + this.opening >= this.C.maxOpen; this.open(coin, f, { s, h, pr }, extra); decision = 'bought'; if (extra) pr.thought = `Super deal: ${pr.thought}`; }
       else decision = 'blocked';
     }
-    const lastT = coin.closed[coin.closed.length - 1].t;
-    if (team || lastT - coin.lastShadowT >= 3 * this.candleMs) {
-      coin.lastShadowT = lastT;
-      if (this.shadows.length < 2500) this.shadows.push({ product: coin.product, entry: f.price, entryT: lastT, x, peak: 0, path: [[0, 0]], team, scores: { scout: s.score, hunter: h.score, professor: pr.score }, votes: { scout: s.vote, hunter: h.vote, professor: pr.vote } });
+    // ---- the short council: same three agents, looking for a fall ----
+    let side = 'long', S = null, shortTeam = false;
+    if (this.C.shorts) {
+      const ss = shortScout(f);
+      ss.vote = ss.critical ? 'avoid' : ss.score >= this.bar('scout', ss.score, true) ? 'short' : 'wait';
+      const sh = shortHunter(f, coin.product === 'BTC-USD');
+      sh.vote = sh.critical ? 'avoid' : sh.score >= this.bar('hunter', sh.score, true) ? 'short' : 'wait';
+      const sp = shortProfessor(f, ss, sh, this.shortLearner, x, this.C.maxAtr);
+      const spb = this.bar('professor', sp.score, true);
+      sp.vote = sp.critical ? 'avoid' : sp.score >= spb ? 'short' : 'wait';
+      if (!sp.critical) sp.thought += ` · needs ${Math.round(spb * 100)}%`;
+      shortTeam = ss.vote === 'short' && sh.vote === 'short' && sp.vote === 'short';
+      S = { s: ss, h: sh, pr: sp, bar: spb };
+      if (shortTeam && !team) {
+        const superShort = sp.score >= Math.max(spb + this.C.superMargin, this.C.superMinProb) && ss.score >= this.C.superMinScout;
+        blocked = this.canOpen(coin, superShort);
+        if (!blocked) { const extra = this.L.positions.length + this.opening >= this.C.maxOpen; this.open(coin, f, S, extra, 'short'); decision = 'shorted'; if (extra) sp.thought = `Super deal: ${sp.thought}`; }
+        else decision = 'blocked';
+      }
+      // Show whichever side looks more interesting on the dashboard.
+      if (decision === 'shorted' || (shortTeam && !team) || (!team && ss.score > s.score && decision === 'pass')) side = 'short';
     }
+    const lastT = coin.closed[coin.closed.length - 1].t;
+    if (team || shortTeam || lastT - coin.lastShadowT >= 3 * this.candleMs) {
+      coin.lastShadowT = lastT;
+      if (this.shadows.length < 2500) this.shadows.push({
+        product: coin.product, entry: f.price, entryT: lastT, x, peak: 0, path: [[0, 0]], team, scores: { scout: s.score, hunter: h.score, professor: pr.score }, votes: { scout: s.vote, hunter: h.vote, professor: pr.vote },
+        sh: S ? { entry: f.price, peak: 0, team: shortTeam } : null,
+      });
+    }
+    const V = side === 'short' ? S : { s, h, pr };
     const item = {
       at: Date.now(), mint: coin.product, symbol: coin.symbol, name: coin.name, age: 0, buyers: 0, mcapUsd: 0,
       c1: fmtPrice(f.price), c2: `${f.r288 >= 0 ? '+' : ''}${(f.r288 * 100).toFixed(1)}%`,
       meta: `${fmtPrice(f.price)} · 24h ${f.r288 >= 0 ? '+' : ''}${(f.r288 * 100).toFixed(1)}% · RSI ${f.rsi.toFixed(0)}`,
-      votes: { scout: s.vote, hunter: h.vote, professor: pr.vote },
-      scores: { scout: +s.score.toFixed(2), hunter: +h.score.toFixed(2), professor: +pr.score.toFixed(2) },
-      thoughts: { scout: s.thought, hunter: h.thought, professor: pr.thought }, decision, blocked,
+      side, votes: { scout: V.s.vote, hunter: V.h.vote, professor: V.pr.vote },
+      scores: { scout: +V.s.score.toFixed(2), hunter: +V.h.score.toFixed(2), professor: +V.pr.score.toFixed(2) },
+      thoughts: side === 'short' ? { scout: `Short? ${V.s.thought}`, hunter: `Short? ${V.h.thought}`, professor: `Short? ${V.pr.thought}` } : { scout: s.thought, hunter: h.thought, professor: pr.thought }, decision, blocked,
     };
     this.radar.unshift(item); if (this.radar.length > 40) this.radar.length = 40;
     this.emit('radar', item);
@@ -201,20 +239,20 @@ export class CryptoEngine extends EventEmitter {
     return '';
   }
 
-  open(coin, f, v, superDeal = false) {
+  open(coin, f, v, superDeal = false, side = 'long') {
     const now = Date.now(), cost = this.C.tradeSize;
     const p = {
       id: `${now}-${coin.symbol}`, mint: coin.product, symbol: coin.symbol, name: coin.name, openedAt: now,
-      entryT: coin.closed[coin.closed.length - 1].t, entry: f.price, cost, value: cost, peak: 0, peakRet: 0, lastRet: 0, heldSec: 0,
+      side, entryT: coin.closed[coin.closed.length - 1].t, entry: f.price, cost, value: cost, peak: 0, peakRet: 0, lastRet: 0, heldSec: 0,
       thoughts: { scout: v.s.thought, hunter: v.h.thought, professor: v.pr.thought },
     };
     this.L.balance -= cost;
     this.L.positions.push(p);
     this.L.counters.deals++;
     if (superDeal) p.superDeal = true;
-    this.log(`DEAL crypto buy ${coin.symbol} $${cost} at ${fmtPrice(f.price)}${superDeal ? ' (super deal, extra slot)' : ''}`);
+    this.log(`DEAL crypto ${side === 'short' ? 'SHORT' : 'buy'} ${coin.symbol} $${cost} at ${fmtPrice(f.price)}${superDeal ? ' (super deal, extra slot)' : ''}`);
     this.emit('deal', this.publicPos(p));
-    this.notifier.send(`${superDeal ? '⭐ SUPER DEAL (extra slot)' : '🟢'} Practice buy ${coin.symbol} $${cost} at ${fmtPrice(f.price)}\nProfessor: ${v.pr.thought}`);
+    this.notifier.send(`${superDeal ? '⭐ SUPER DEAL (extra slot) ' : ''}${side === 'short' ? '🔽 Practice SHORT' : '🟢 Practice buy'} ${coin.symbol} $${cost} at ${fmtPrice(f.price)}\nProfessor: ${v.pr.thought}`);
     this.ledger.save();
   }
 
@@ -222,14 +260,14 @@ export class CryptoEngine extends EventEmitter {
     if (!this.L.positions.includes(p)) return;
     const now = Date.now();
     const proceeds = p.cost * (1 + fillRet);
-    const trade = { id: p.id, mint: p.mint, symbol: p.symbol, name: p.name, openedAt: p.openedAt, closedAt: now, cost: p.cost, proceeds, pnl: proceeds - p.cost, ret: fillRet, reason, holdSec: Math.round(heldSec ?? p.heldSec ?? 0), estimated: false };
+    const trade = { id: p.id, mint: p.mint, symbol: p.symbol, name: p.name, openedAt: p.openedAt, closedAt: now, side: p.side || 'long', cost: p.cost, proceeds, pnl: proceeds - p.cost, ret: fillRet, reason, holdSec: Math.round(heldSec ?? p.heldSec ?? 0), estimated: false };
     this.L.balance += proceeds;
     this.L.positions = this.L.positions.filter((x) => x !== p);
     this.L.trades.unshift(trade); if (this.L.trades.length > 1000) this.L.trades.length = 1000;
     this.L.daily.pnl += trade.pnl;
-    this.log(`EXIT ${p.symbol} ${(fillRet * 100).toFixed(2)}% (${reason})`);
+    this.log(`EXIT ${p.side === 'short' ? 'short ' : ''}${p.symbol} ${(fillRet * 100).toFixed(2)}% (${reason})`);
     this.emit('exit', trade);
-    this.notifier.send(`${trade.pnl >= 0 ? '✅' : '🔻'} Sold ${p.symbol}: ${(fillRet * 100).toFixed(2)}% (${trade.pnl >= 0 ? '+' : ''}$${trade.pnl.toFixed(2)}), ${reason}`);
+    this.notifier.send(`${trade.pnl >= 0 ? '✅' : '🔻'} ${p.side === 'short' ? 'Closed short' : 'Sold'} ${p.symbol}: ${(fillRet * 100).toFixed(2)}% (${trade.pnl >= 0 ? '+' : ''}$${trade.pnl.toFixed(2)}), ${reason}`);
     this.sampleEquity();
     this.checkBreaker();
     this.ledger.save();
@@ -255,6 +293,11 @@ export class CryptoEngine extends EventEmitter {
     const ret = s.done ? s.result : s.path[s.path.length - 1][1];
     const y = ret > 0 ? 1 : 0;
     this.learner.learn(s.x, y);
+    if (s.sh) {
+      const sret = s.sh.done ? s.sh.result : this.netSide((s.lastClose ?? s.entry) / s.entry, 'short', s.held || 0);
+      this.shortLearner.learn(s.x, sret > 0 ? 1 : 0);
+      if (s.sh.team) { this.B.shortTeam.calls++; if (sret > 0) this.B.shortTeam.wins++; }
+    }
     const A = this.B.agents;
     for (const a of AGENTS) { const v = s.votes[a], st = A[a]; if (v === 'buy') { st.calls++; st.buys++; if (y) { st.right++; st.buyWins++; } } else if (v === 'avoid') { st.calls++; if (!y) st.right++; } }
     if (s.team) { A.team.buys++; if (y) A.team.buyWins++; }
@@ -324,7 +367,7 @@ export class CryptoEngine extends EventEmitter {
     E.push({ t: Date.now(), v }); if (this.L.ddPeak != null) this.L.ddPeak = Math.max(this.L.ddPeak, v);
     if (E.length > 4000) { const half = E.splice(0, 2000); E.unshift(...half.filter((_, i) => i % 2 === 0)); }
   }
-  persist() { this.B.learner = this.learner.toJSON(); this.brain.save(); this.ledger.save(); }
+  persist() { this.B.learner = this.learner.toJSON(); this.B.shortLearner = this.shortLearner.toJSON(); this.brain.save(); this.ledger.save(); }
 
   async control(action) {
     if (action === 'pause') this.L.paused = true;
@@ -358,7 +401,9 @@ export class CryptoEngine extends EventEmitter {
         hunter: { accuracy: acc('hunter'), calls: A.hunter.calls, threshold: this.B.thresholds.hunter },
         professor: { accuracy: acc('professor'), calls: A.professor.calls, threshold: this.B.thresholds.professor },
         team: { buys: A.team.buys, winRate: A.team.buys ? A.team.buyWins / A.team.buys : null },
+        shortTeam: { calls: this.B.shortTeam.calls, winRate: this.B.shortTeam.calls ? this.B.shortTeam.wins / this.B.shortTeam.calls : null },
       },
+      shorts: !!this.C.shorts,
       learning: { samples: this.learner.n, accuracy: this.learner.accuracy(), watching: this.shadows.length },
       counters: { ...this.L.counters, seen: this.L.counters.evaluated, tracked: this.coins.size },
       meta: null,

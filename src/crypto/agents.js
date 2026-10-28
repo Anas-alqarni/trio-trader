@@ -34,6 +34,7 @@ export function cryptoFeatures(cs, btc, fg) {
     r1: ret(cs, 1), r6: ret(cs, 6), r24: ret(cs, 24), r288: ret(cs, Math.min(288, cs.length - 1)),
     emaGap: ema(closes.slice(-60), 20) / ema(closes.slice(-120), 50) - 1,
     breakout: last.c / prevHigh - 1,
+    breakdown: last.c / Math.min(...cs.slice(-25, -1).map((x) => x.l)) - 1,
     volRatio: avgVol > 0 ? last.v / avgVol : 1,
     rsi: rsi(closes),
     atr: atrPct(cs),
@@ -84,4 +85,40 @@ export function cryptoProfessor(f, s, h, learner, x, maxAtr) {
   const heuristic = clamp(0.15 + 0.45 * s.score + 0.3 * h.score);
   const p = learner.predict(x, heuristic);
   return { score: p, critical: risks[0] || '', thought: risks.length ? `Too risky: ${risks[0]}` : `${Math.round(p * 100)}% chance of profit${learner.n < 150 ? ' (still learning)' : ''}` };
+}
+
+// ---------- the short side: the same jobs, looking for falling coins ----------
+export function shortScout(f) {
+  let critical = '';
+  if (f.rsi < 20) critical = `oversold (RSI ${f.rsi.toFixed(0)}), likely to bounce`;
+  else if (f.r6 > 0.025) critical = `rising fast (${pct(f.r6)} in 30 min)`;
+  let s = 0;
+  s += f.emaGap < 0 ? 0.3 : 0;
+  s += clamp(-f.r6 / 0.01) * 0.2;
+  s += f.breakdown < 0 ? 0.2 : f.breakdown < 0.003 ? 0.1 : 0;
+  s += clamp((f.volRatio - 1) / 1.5) * 0.15;
+  s += f.rsi >= 30 && f.rsi <= 50 ? 0.15 : 0;
+  const thought = critical ? `Pass: ${critical}` : `${f.emaGap < 0 ? 'Trend down' : 'Trend up'} · ${pct(f.r6)} in 30m · volume ${f.volRatio.toFixed(1)}x · RSI ${f.rsi.toFixed(0)}`;
+  return { score: clamp(s), critical, thought };
+}
+
+export function shortHunter(f, isBtc) {
+  let critical = '';
+  if (f.btc24 > 0.03) critical = `Bitcoin is rising hard (${pct(f.btc24)} in 2h)`;
+  const fgLabel = f.fg < 25 ? 'extreme fear' : f.fg < 45 ? 'fear' : f.fg <= 55 ? 'neutral' : f.fg < 75 ? 'greed' : 'extreme greed';
+  let s = 0;
+  s += clamp((80 - f.fg) / 60) * 0.3;
+  s += f.btcTrend < 0 ? 0.35 : 0.07;
+  s += isBtc ? 0.15 : clamp(0.5 - f.relStrength / 0.02) * 0.35;
+  const thought = critical ? `Pass: ${critical}` : `Fear & Greed ${Math.round(f.fg)} (${fgLabel}) · Bitcoin trend ${f.btcTrend < 0 ? 'down' : 'up'}${isBtc ? '' : ` · ${f.relStrength <= 0 ? 'weaker' : 'stronger'} than BTC by ${pct(Math.abs(f.relStrength))}`}`;
+  return { score: clamp(s), critical, thought };
+}
+
+export function shortProfessor(f, s, h, learner, x, maxAtr) {
+  const risks = [];
+  if (f.atr > maxAtr) risks.push(`too jumpy right now (moves ${(f.atr * 100).toFixed(1)}% per candle)`);
+  if (f.r288 < -0.15) risks.push(`already down ${pct(f.r288, 0)} today, could bounce`);
+  const heuristic = clamp(0.15 + 0.45 * s.score + 0.3 * h.score);
+  const p = learner.predict(x, heuristic);
+  return { score: p, critical: risks[0] || '', thought: risks.length ? `Too risky: ${risks[0]}` : `${Math.round(p * 100)}% chance a short profits${learner.n < 150 ? ' (still learning)' : ''}` };
 }
