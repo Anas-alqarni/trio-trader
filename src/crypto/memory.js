@@ -70,7 +70,8 @@ export function riskTeam({ side, positions, dailyPnl, dailyLimit, lastTrades, mo
   };
   const votes = Object.values(v).map((x) => x[0]);
   const no = votes.filter((x) => x === 'no').length, smaller = votes.filter((x) => x === 'smaller').length;
-  const mult = no >= 2 ? 0 : no === 1 || smaller >= 2 ? 0.6 : 1;
+  // Too many trades leaning the same way is a hard stop: they all follow Bitcoin, so it is really one big bet.
+  const mult = no >= 2 || v.neutral[0] === 'no' ? 0 : no === 1 || smaller >= 2 ? 0.6 : 1;
   const verdict = mult === 0 ? 'rejected' : mult < 1 ? 'smaller size' : 'full size';
   const worry = Object.entries(v).find(([, x]) => x[0] !== 'ok');
   return { mult, verdict, votes: v, text: `Risk team: ${verdict}${worry ? ` (${worry[0]}: ${worry[1][1]})` : ''}` };

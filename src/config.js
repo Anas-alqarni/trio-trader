@@ -37,7 +37,7 @@ const cfg = {
     coinRestAfter: num('COIN_REST_AFTER_LOSSES', 3),      // a coin+side that loses this many times in a row rests…
     coinRestHours: num('COIN_REST_HOURS', 6),             // …for this many hours
     riskTeam: bool('CRYPTO_RISK_TEAM', true),
-    maxSameSide: num('MAX_SAME_SIDE', 4),                 // most trades leaning the same way (they all follow Bitcoin)
+    maxSameSide: num('MAX_SAME_SIDE', 3),                 // most trades leaning the same way (they all follow Bitcoin)
     leverage: Math.max(1, Math.min(20, num('CRYPTO_LEVERAGE', 10))), // practice leverage: a 2% move = 20% on the trade's money at 10x
     fundingPer8h: num('CRYPTO_FUNDING_PCT_8H', 0.01) / 100, // what a short pays to stay open, per 8 hours
     // Super deals: when every slot is full, a coin far above the bars can still get in.

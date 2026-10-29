@@ -53,7 +53,9 @@ export class CryptoEngine extends EventEmitter {
     this.shadows = [];
     this.ghosts = []; // what an early-closed trade would have done without the Guardian
     this.radar = [];
-    this.recentScores = { scout: [], hunter: [], professor: [], Sscout: [], Shunter: [], Sprofessor: [] };
+    // Recent scores set the bars; they are saved so a restart doesn't drop the bars back to defaults.
+    this.recentScores = { scout: [], hunter: [], professor: [], Sscout: [], Shunter: [], Sprofessor: [], ...(this.B.recentScores || {}) };
+    this.B.recentScores = this.recentScores;
     this.startedAt = Date.now();
     this.feedStatus = 'connecting';
     this.lastDataAt = 0;
@@ -308,6 +310,7 @@ export class CryptoEngine extends EventEmitter {
 
   canOpen(coin, superDeal = false, side = 'long') {
     if (this.L.paused) return 'paused';
+    if ((this.recentScores[(side === 'short' ? 'S' : '') + 'professor'] || []).length < 80) return 'warming up: learning today\'s normal scores first';
     if (this.L.positions.some((p) => p.mint === coin.product)) return 'already holding it';
     const rec = this.B.coinRecords[`${coin.symbol} ${side}`];
     if (rec && rec.restUntil > Date.now()) return `resting ${coin.symbol} ${side === 'short' ? 'shorts' : 'buys'} after ${this.C.coinRestAfter} losses in a row (${Math.ceil((rec.restUntil - Date.now()) / 3_600_000)}h left)`;
