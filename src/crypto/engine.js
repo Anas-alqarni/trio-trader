@@ -59,6 +59,8 @@ export class CryptoEngine extends EventEmitter {
   }
   net(q) { const s = 1 - this.C.slippage, f = 1 - this.C.fee; return q * s * s * f * f - 1; }
   /** Result of a trade when the price moved from entry to entry*q. A short gains when q falls, and pays funding while open. */
+  /** Result on the money put in: the price result times the leverage (fees are on the full amount). Can't lose more than the money put in. */
+  acct(p, r) { return Math.max(-1, (p.lev || 1) * r); }
   netSide(q, side, heldSec = 0) {
     if (side !== 'short') return this.net(q);
     const s = 1 - this.C.slippage, f = 1 - this.C.fee;
@@ -138,7 +140,7 @@ export class CryptoEngine extends EventEmitter {
         const btc = this.coins.get('BTC-USD')?.closed;
         const why = guardianTurned(cryptoFeatures(coin.closed, btc && btc.length >= 130 ? btc : null, this.fg), p.side || 'long', p.last ?? 0);
         if (why) {
-          this.ghosts.push({ product: p.mint, side: p.side || 'long', entry: p.entry, entryT: p.entryT, peak: p.peak, cost: p.cost, fill: p.last, symbol: p.symbol });
+          this.ghosts.push({ product: p.mint, side: p.side || 'long', entry: p.entry, entryT: p.entryT, peak: p.peak, cost: p.cost, fill: p.last, symbol: p.symbol, lev: p.lev || 1 });
           this.close(p, p.last, `Guardian: ${why}`, held);
         }
       }
@@ -163,7 +165,7 @@ export class CryptoEngine extends EventEmitter {
   /** Compare the Guardian's early exit with what the normal rules would have done. */
   resolveGhost(g, wouldHave) {
     this.ghosts = this.ghosts.filter((x) => x !== g);
-    const G = this.B.guardian, diff = (g.fill - wouldHave) * g.cost;
+    const G = this.B.guardian, diff = (g.fill - wouldHave) * g.cost * (g.lev || 1);
     G.exits++; G.saved += diff; if (diff > 0) G.helped++;
     if (G.exits >= 20 && G.saved < 0 && G.active) {
       G.active = false;
@@ -176,7 +178,7 @@ export class CryptoEngine extends EventEmitter {
     for (const p of this.L.positions) if (p.mint === coin.product && coin.live) {
       p.heldSec = Math.round(((Date.now() - p.openedAt) / this.candleMs) * VSEC);
       const r = this.netSide(coin.live / p.entry, p.side || 'long', p.heldSec);
-      p.lastRet = r; p.value = p.cost * (1 + r);
+      p.lastRet = r; p.acctRet = this.acct(p, r); p.value = p.cost * (1 + p.acctRet);
     }
   }
 
@@ -245,7 +247,7 @@ export class CryptoEngine extends EventEmitter {
       });
     }
     const V = side === 'short' ? S : { s, h, pr };
-    const open = this.L.positions.map((p) => `${p.symbol}${p.side === 'short' ? '↓' : ''} ${(p.lastRet * 100 >= 0 ? '+' : '')}${(p.lastRet * 100).toFixed(1)}%`).join(', ');
+    const open = this.L.positions.map((p) => { const r = p.acctRet ?? p.lastRet; return `${p.symbol}${p.side === 'short' ? '↓' : ''} ${r >= 0 ? '+' : ''}${(r * 100).toFixed(1)}%`; }).join(', ');
     const guard = decision === 'bought' || decision === 'shorted' ? this.lastGuard : open ? `Watching ${open}` : 'No open trades to protect';
     const item = {
       at: Date.now(), mint: coin.product, symbol: coin.symbol, name: coin.name, age: 0, buyers: 0, mcapUsd: 0,
@@ -279,31 +281,34 @@ export class CryptoEngine extends EventEmitter {
     this.lastGuard = `Size $${cost.toFixed(0)} (${g.mult.toFixed(1)}x): ${g.why}`;
     const p = {
       id: `${now}-${coin.symbol}`, mint: coin.product, symbol: coin.symbol, name: coin.name, openedAt: now,
-      side, entryT: coin.closed[coin.closed.length - 1].t, entry: f.price, cost, value: cost, peak: 0, peakRet: 0, lastRet: 0, heldSec: 0,
+      side, lev: this.C.leverage, entryT: coin.closed[coin.closed.length - 1].t, entry: f.price, cost, value: cost, acctRet: 0, peak: 0, peakRet: 0, lastRet: 0, heldSec: 0,
       thoughts: { scout: v.s.thought, hunter: v.h.thought, professor: v.pr.thought, guardian: this.lastGuard }, sizeMult: +g.mult.toFixed(2),
     };
     this.L.balance -= cost;
     this.L.positions.push(p);
     this.L.counters.deals++;
     if (superDeal) p.superDeal = true;
-    this.log(`DEAL crypto ${side === 'short' ? 'SHORT' : 'buy'} ${coin.symbol} $${cost} at ${fmtPrice(f.price)}${superDeal ? ' (super deal, extra slot)' : ''}`);
+    const levTxt = this.C.leverage > 1 ? ` x${this.C.leverage} (controls $${(cost * this.C.leverage).toFixed(0)})` : '';
+    this.log(`DEAL crypto ${side === 'short' ? 'SHORT' : 'buy'} ${coin.symbol} $${cost}${levTxt} at ${fmtPrice(f.price)}${superDeal ? ' (super deal, extra slot)' : ''}`);
     this.emit('deal', this.publicPos(p));
-    this.notifier.send(`${superDeal ? '⭐ SUPER DEAL (extra slot) ' : ''}${side === 'short' ? '🔽 Practice SHORT' : '🟢 Practice buy'} ${coin.symbol} $${cost.toFixed(2)} at ${fmtPrice(f.price)}\nProfessor: ${v.pr.thought}\nGuardian: ${this.lastGuard}`);
+    this.notifier.send(`${superDeal ? '⭐ SUPER DEAL (extra slot) ' : ''}${side === 'short' ? '🔽 Practice SHORT' : '🟢 Practice buy'} ${coin.symbol} $${cost.toFixed(2)}${levTxt} at ${fmtPrice(f.price)}\nProfessor: ${v.pr.thought}\nGuardian: ${this.lastGuard}`);
     this.ledger.save();
   }
 
   close(p, fillRet, reason, heldSec) {
     if (!this.L.positions.includes(p)) return;
     const now = Date.now();
-    const proceeds = p.cost * (1 + fillRet);
-    const trade = { id: p.id, mint: p.mint, symbol: p.symbol, name: p.name, openedAt: p.openedAt, closedAt: now, side: p.side || 'long', cost: p.cost, proceeds, pnl: proceeds - p.cost, ret: fillRet, reason, holdSec: Math.round(heldSec ?? p.heldSec ?? 0), estimated: false };
+    const ret = this.acct(p, fillRet);
+    const proceeds = p.cost * (1 + ret);
+    const trade = { id: p.id, mint: p.mint, symbol: p.symbol, name: p.name, openedAt: p.openedAt, closedAt: now, side: p.side || 'long', cost: p.cost, proceeds, pnl: proceeds - p.cost, ret, priceRet: fillRet, lev: p.lev || 1, reason, holdSec: Math.round(heldSec ?? p.heldSec ?? 0), estimated: false };
     this.L.balance += proceeds;
     this.L.positions = this.L.positions.filter((x) => x !== p);
     this.L.trades.unshift(trade); if (this.L.trades.length > 1000) this.L.trades.length = 1000;
     this.L.daily.pnl += trade.pnl;
-    this.log(`EXIT ${p.side === 'short' ? 'short ' : ''}${p.symbol} ${(fillRet * 100).toFixed(2)}% (${reason})`);
+    const priceTxt = (p.lev || 1) > 1 ? ` (price ${(fillRet * 100).toFixed(2)}% x${p.lev})` : '';
+    this.log(`EXIT ${p.side === 'short' ? 'short ' : ''}${p.symbol} ${(ret * 100).toFixed(1)}%${priceTxt} (${reason})`);
     this.emit('exit', trade);
-    this.notifier.send(`${trade.pnl >= 0 ? '✅' : '🔻'} ${p.side === 'short' ? 'Closed short' : 'Sold'} ${p.symbol}: ${(fillRet * 100).toFixed(2)}% (${trade.pnl >= 0 ? '+' : ''}$${trade.pnl.toFixed(2)}), ${reason}`);
+    this.notifier.send(`${trade.pnl >= 0 ? '✅' : '🔻'} ${p.side === 'short' ? 'Closed short' : 'Sold'} ${p.symbol}: ${(ret * 100).toFixed(1)}%${priceTxt} (${trade.pnl >= 0 ? '+' : ''}$${trade.pnl.toFixed(2)}), ${reason}`);
     this.sampleEquity();
     this.checkBreaker();
     this.ledger.save();
@@ -444,7 +449,7 @@ export class CryptoEngine extends EventEmitter {
       learning: { samples: this.learner.n, accuracy: this.learner.accuracy(), watching: this.shadows.length },
       counters: { ...this.L.counters, seen: this.L.counters.evaluated, tracked: this.coins.size },
       meta: null,
-      config: { tradeSizeSol: this.C.tradeSize, ...r, maxOpen: this.C.maxOpen, dailyLossLimitSol: this.C.dailyLossLimit },
+      config: { tradeSizeSol: this.C.tradeSize, ...r, leverage: this.C.leverage, maxOpen: this.C.maxOpen, dailyLossLimitSol: this.C.dailyLossLimit },
     };
     if (full) {
       snap.trades = trades.slice(0, 60); snap.radar = this.radar;

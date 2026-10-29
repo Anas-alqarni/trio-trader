@@ -30,7 +30,8 @@ const cfg = {
     maxAtr: num('CRYPTO_MAX_ATR_PCT', 1.2) / 100,
     guardian: bool('CRYPTO_GUARDIAN', true),               // 4th agent: sizes trades, can close a trade early
     guardMinMult: num('GUARDIAN_MIN_SIZE', 0.5), guardMaxMult: num('GUARDIAN_MAX_SIZE', 1.5),
-    shorts: bool('CRYPTO_SHORTS', true),                    // practice shorts: profit when a coin falls (no leverage)
+    shorts: bool('CRYPTO_SHORTS', true),                    // practice shorts: profit when a coin falls
+    leverage: Math.max(1, Math.min(20, num('CRYPTO_LEVERAGE', 10))), // practice leverage: a 2% move = 20% on the trade's money at 10x
     fundingPer8h: num('CRYPTO_FUNDING_PCT_8H', 0.01) / 100, // what a short pays to stay open, per 8 hours
     // Super deals: when every slot is full, a coin far above the bars can still get in.
     superSlots: num('CRYPTO_SUPER_SLOTS', 1),

@@ -659,13 +659,13 @@ function setHtml(id, html) { if (lastHtml[id] === html) return; lastHtml[id] = h
 function renderPositions(flashId) {
   const box = $('positions');
   if (!S.positions.length) { setHtml('positions', `<div class="empty">${esc(S.labels?.empty || 'No open trades. The team is waiting for all three to agree.')}</div>`); return; }
-  const lo = -S.config.stopLoss, hi = S.config.takeProfit, span = hi - lo;
-  const x = (r) => Math.max(0, Math.min(100, ((r - lo) / span) * 100));
   lastHtml.positions = null;
   box.innerHTML = S.positions.map((p) => {
-    const r = p.lastRet || 0;
+    const lev = p.lev || 1, lo = -S.config.stopLoss * lev, hi = S.config.takeProfit * lev, span = hi - lo;
+    const x = (r) => Math.max(0, Math.min(100, ((r - lo) / span) * 100));
+    const r = p.acctRet ?? ((p.lastRet || 0) * lev);
     return `<div class="pos ${p.id === flashId ? 'flash' : ''}">
-      <div class="pos-top"><span><b>$${esc(p.symbol)}</b> ${p.side === 'short' ? '<span class="tag-short">SHORT</span> ' : ''}${p.superDeal ? '<span class="st alive">super</span> ' : ''}<span class="muted">${esc(p.name)}</span></span><span class="pos-ret ${cls(r)}">${pct(r)}</span></div>
+      <div class="pos-top"><span><b>$${esc(p.symbol)}</b> ${p.side === 'short' ? '<span class="tag-short">SHORT</span> ' : ''}${p.superDeal ? '<span class="st alive">super</span> ' : ''}${(p.lev || 1) > 1 ? `<span class="tag-short">x${p.lev}</span> ` : ''}<span class="muted">${esc(p.name)}</span></span><span class="pos-ret ${cls(r)}">${pct(r)}</span></div>
       <div class="track"><span class="zero" style="left:${x(0)}%"></span><span class="now" style="left:${x(r)}%;background:${r >= 0 ? 'var(--gain)' : 'var(--loss)'}"></span></div>
       <div class="track-labels"><span>sell at ${pct(lo, 0)}</span><span>${sol(p.value, 4)} · held ${dur(p.heldSec)}</span><span>sell at ${pct(hi, 0)}</span></div>
     </div>`;
@@ -749,7 +749,9 @@ function renderAnalysis() {
 function renderSettings() {
   const c = S.config;
   const items = [
-    ['Each trade', sol(c.tradeSizeSol, 3)], ['Take profit at', pct(c.takeProfit, isUsd() ? 1 : 0)], ['Stop loss at', pct(-c.stopLoss, isUsd() ? 1 : 0)],
+    ['Each trade', sol(c.tradeSizeSol, 3) + ((c.leverage || 1) > 1 ? ` x${c.leverage}` : '')],
+    ['Take profit at', pct(c.takeProfit, isUsd() ? 1 : 0) + ((c.leverage || 1) > 1 ? ` price = ${pct(c.takeProfit * c.leverage, 0)} on the money` : '')],
+    ['Stop loss at', pct(-c.stopLoss, isUsd() ? 1 : 0) + ((c.leverage || 1) > 1 ? ` price = ${pct(-c.stopLoss * c.leverage, 0)} on the money` : '')],
     ['Trailing stop', `${pc(c.trailing)} from the top`], ['Longest hold', c.maxHoldMin >= 120 ? `${(c.maxHoldMin / 60).toFixed(0)} hours` : `${c.maxHoldMin} min`], ['Open trades at once', c.maxOpen],
     ['Stop for the day after losing', sol(c.dailyLossLimitSol, 2)], ['Buy rule', 'All 3 agents say BUY'], ['Sell rule', S.analysis?.ruleTuned ? 'Tuned by the bot' : 'Your settings'],
   ];
