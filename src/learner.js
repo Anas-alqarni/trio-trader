@@ -67,7 +67,8 @@ export class Learner {
       this.m2[i] += d * (x[i] - this.mean[i]);
     }
     const z = this.norm(x), g = p - y;
-    for (let i = 0; i < this.dim; i++) this.w[i] -= this.lr * (g * z[i] + this.l2 * this.w[i]);
+    // Weights are kept within ±2 so no single signal can dominate the answer.
+    for (let i = 0; i < this.dim; i++) this.w[i] = Math.max(-2, Math.min(2, this.w[i] - this.lr * (g * z[i] + this.l2 * this.w[i])));
     this.b -= this.lr * g;
   }
   accuracy(last = 100) {

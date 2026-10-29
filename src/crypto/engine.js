@@ -39,6 +39,16 @@ export class CryptoEngine extends EventEmitter {
     for (const [k, v] of Object.entries(cryptoBrainDefaults(cfg))) if (this.B[k] === undefined) this.B[k] = v;
     this.learner = new Learner(CRYPTO_FEATURES.length, this.B.learner, CRYPTO_FEATURES);
     this.shortLearner = new Learner(CRYPTO_FEATURES.length, this.B.shortLearner, CRYPTO_FEATURES); // learns when shorts pay
+    // Brains trained before the signal fix (v2) learned extreme weights from blown-up Fear & Greed readings.
+    // Rebuild them from the saved setups instead of keeping the damage.
+    if ((this.B.learnerVersion || 1) < 2) {
+      const S = this.B.samples || [];
+      this.learner = new Learner(CRYPTO_FEATURES.length, null, CRYPTO_FEATURES);
+      this.shortLearner = new Learner(CRYPTO_FEATURES.length, null, CRYPTO_FEATURES);
+      for (const x of S) { this.learner.learn(x.x, x.ret > 0 ? 1 : 0); if (x.sret != null) this.shortLearner.learn(x.x, x.sret > 0 ? 1 : 0); }
+      this.B.learnerVersion = 2;
+      this.log(`brain rebuilt after the signal fix: buy brain from ${this.learner.n} setups, short brain from ${this.shortLearner.n}`);
+    }
     this.coins = new Map(COINS.filter(([p]) => !this.C.coins || this.C.coins.includes(p)).map(([p, name]) => [p, { product: p, name, symbol: p.split('-')[0], closed: [], lastT: 0, lastShadowT: 0, live: null }]));
     this.shadows = [];
     this.ghosts = []; // what an early-closed trade would have done without the Guardian
