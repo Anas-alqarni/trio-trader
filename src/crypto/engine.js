@@ -268,7 +268,8 @@ export class CryptoEngine extends EventEmitter {
     // A "super deal": far above the bars on every count. It may use an extra slot when the normal ones are full.
     const tryOpen = (sd, V, sideName) => {
       const superDeal = V.pr.score >= Math.max(V.bar + this.C.superMargin, this.C.superMinProb) && V.s.score >= this.C.superMinScout;
-      let why = this.canOpen(coin, superDeal, sideName);
+      let why = this.C.superOnly && !superDeal ? `not a super deal (needs ${Math.round(Math.max(V.bar + this.C.superMargin, this.C.superMinProb) * 100)}%+ and a Scout score of ${this.C.superMinScout}+)` : '';
+      why ||= this.canOpen(coin, superDeal, sideName);
       let risk = null;
       if (!why && this.C.riskTeam) {
         risk = riskTeam({ side: sideName, positions: this.L.positions, dailyPnl: this.L.daily.pnl, dailyLimit: this.C.dailyLossLimit, lastTrades: this.L.trades, mood: this.B.mood, atr: f.atr, maxAtr: this.C.maxAtr, maxSameSide: this.C.maxSameSide });
@@ -276,7 +277,7 @@ export class CryptoEngine extends EventEmitter {
       }
       if (why) return { decision: 'blocked', blocked: why };
       const extra = this.L.positions.length + this.opening >= this.C.maxOpen;
-      this.open(coin, f, { ...V, mem, risk }, extra, sideName);
+      this.open(coin, f, { ...V, mem, risk }, superDeal, sideName, extra);
       if (extra) V.pr.thought = `Super deal: ${V.pr.thought}`;
       return { decision: sideName === 'short' ? 'shorted' : 'bought', blocked: '' };
     };
@@ -322,7 +323,7 @@ export class CryptoEngine extends EventEmitter {
     return '';
   }
 
-  open(coin, f, v, superDeal = false, side = 'long') {
+  open(coin, f, v, superDeal = false, side = 'long', extraSlot = false) {
     const now = Date.now();
     const bar = v.bar ?? this.bar('professor', v.pr.score, side === 'short');
     const g = this.C.guardian ? guardianSize(this.C.tradeSize, v.pr.score, bar, f.atr, this.L.balance, this.C.guardMinMult, this.C.guardMaxMult) : { size: this.C.tradeSize, mult: 1, why: '' };
@@ -340,9 +341,9 @@ export class CryptoEngine extends EventEmitter {
     this.L.counters.deals++;
     if (superDeal) p.superDeal = true;
     const levTxt = this.C.leverage > 1 ? ` x${this.C.leverage} (controls $${(cost * this.C.leverage).toFixed(0)})` : '';
-    this.log(`DEAL crypto ${side === 'short' ? 'SHORT' : 'buy'} ${coin.symbol} $${cost}${levTxt} at ${fmtPrice(f.price)}${superDeal ? ' (super deal, extra slot)' : ''}`);
+    this.log(`DEAL crypto ${side === 'short' ? 'SHORT' : 'buy'} ${coin.symbol} $${cost}${levTxt} at ${fmtPrice(f.price)}${superDeal ? ` (super deal${extraSlot ? ', extra slot' : ''})` : ''}`);
     this.emit('deal', this.publicPos(p));
-    this.notifier.send(`${superDeal ? '⭐ SUPER DEAL (extra slot) ' : ''}${side === 'short' ? '🔽 Practice SHORT' : '🟢 Practice buy'} ${coin.symbol} $${cost.toFixed(2)}${levTxt} at ${fmtPrice(f.price)}\nProfessor: ${v.pr.thought}\nGuardian: ${this.lastGuard}`);
+    this.notifier.send(`${superDeal ? `⭐ SUPER DEAL${extraSlot ? ' (extra slot)' : ''} ` : ''}${side === 'short' ? '🔽 Practice SHORT' : '🟢 Practice buy'} ${coin.symbol} $${cost.toFixed(2)}${levTxt} at ${fmtPrice(f.price)}\nProfessor: ${v.pr.thought}\nGuardian: ${this.lastGuard}`);
     this.ledger.save();
   }
 
@@ -515,7 +516,7 @@ export class CryptoEngine extends EventEmitter {
       learning: { samples: this.learner.n, accuracy: this.learner.accuracy(), watching: this.shadows.length },
       counters: { ...this.L.counters, seen: this.L.counters.evaluated, tracked: this.coins.size },
       meta: null,
-      config: { tradeSizeSol: this.C.tradeSize, ...r, leverage: this.C.leverage, maxOpen: this.C.maxOpen, dailyLossLimitSol: this.C.dailyLossLimit },
+      config: { tradeSizeSol: this.C.tradeSize, ...r, leverage: this.C.leverage, superOnly: !!this.C.superOnly, maxOpen: this.C.maxOpen, dailyLossLimitSol: this.C.dailyLossLimit },
     };
     if (full) {
       snap.trades = trades.slice(0, 60); snap.radar = this.radar;

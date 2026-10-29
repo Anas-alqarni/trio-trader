@@ -42,6 +42,7 @@ const cfg = {
     fundingPer8h: num('CRYPTO_FUNDING_PCT_8H', 0.01) / 100, // what a short pays to stay open, per 8 hours
     // Super deals: when every slot is full, a coin far above the bars can still get in.
     superSlots: num('CRYPTO_SUPER_SLOTS', 1),
+    superOnly: bool('SUPER_DEALS_ONLY', true),             // trade only super deals; normal deals are skipped (still learned from)
     superMinProb: num('CRYPTO_SUPER_MIN_PROB', 65) / 100,  // Professor's chance of profit at least this…
     superMargin: num('CRYPTO_SUPER_MARGIN', 15) / 100,     // …and this far above his normal bar
     superMinScout: num('CRYPTO_SUPER_MIN_SCOUT', 0.75),    // and a very strong chart

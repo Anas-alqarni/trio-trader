@@ -778,7 +778,7 @@ function renderSettings() {
     ['Take profit at', pct(c.takeProfit, isUsd() ? 1 : 0) + ((c.leverage || 1) > 1 ? ` price = ${pct(c.takeProfit * c.leverage, 0)} on the money` : '')],
     ['Stop loss at', pct(-c.stopLoss, isUsd() ? 1 : 0) + ((c.leverage || 1) > 1 ? ` price = ${pct(-c.stopLoss * c.leverage, 0)} on the money` : '')],
     ['Trailing stop', `${pc(c.trailing)} from the top`], ['Longest hold', c.maxHoldMin >= 120 ? `${(c.maxHoldMin / 60).toFixed(0)} hours` : `${c.maxHoldMin} min`], ['Open trades at once', c.maxOpen],
-    ['Stop for the day after losing', sol(c.dailyLossLimitSol, 2)], ['Buy rule', 'All 3 agents say BUY'], ['Sell rule', S.analysis?.ruleTuned ? 'Tuned by the bot' : 'Your settings'],
+    ['Stop for the day after losing', sol(c.dailyLossLimitSol, 2)], ['Buy rule', c.superOnly ? 'Super deals only' : 'All 3 agents say BUY'], ['Sell rule', S.analysis?.ruleTuned ? 'Tuned by the bot' : 'Your settings'],
   ];
   $('settings').innerHTML = items.map(([k, v]) => `<div class="setting"><span>${k}</span><b>${esc(v)}</b></div>`).join('');
   $('ctlHint').textContent = S.controlsEnabled ? 'Enter the dashboard password to pause the team or close every trade.' : 'Buttons are off until DASHBOARD_PASSWORD is set in Railway Variables.';
