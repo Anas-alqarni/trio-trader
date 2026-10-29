@@ -31,6 +31,13 @@ const cfg = {
     guardian: bool('CRYPTO_GUARDIAN', true),               // 4th agent: sizes trades, can close a trade early
     guardMinMult: num('GUARDIAN_MIN_SIZE', 0.5), guardMaxMult: num('GUARDIAN_MAX_SIZE', 1.5),
     shorts: bool('CRYPTO_SHORTS', true),                    // practice shorts: profit when a coin falls
+    // Ideas from TradingAgents (TauricResearch): bull vs bear debate, a risk team, memory of similar setups.
+    debateMargin: num('DEBATE_MARGIN_PCT', 5) / 100,       // the winning side must beat the other side's chance by this much
+    memoryWeight: num('MEMORY_WEIGHT', 0.3),              // how much similar past setups count in the Professor's chance
+    coinRestAfter: num('COIN_REST_AFTER_LOSSES', 3),      // a coin+side that loses this many times in a row rests…
+    coinRestHours: num('COIN_REST_HOURS', 6),             // …for this many hours
+    riskTeam: bool('CRYPTO_RISK_TEAM', true),
+    maxSameSide: num('MAX_SAME_SIDE', 4),                 // most trades leaning the same way (they all follow Bitcoin)
     leverage: Math.max(1, Math.min(20, num('CRYPTO_LEVERAGE', 10))), // practice leverage: a 2% move = 20% on the trade's money at 10x
     fundingPer8h: num('CRYPTO_FUNDING_PCT_8H', 0.01) / 100, // what a short pays to stay open, per 8 hours
     // Super deals: when every slot is full, a coin far above the bars can still get in.

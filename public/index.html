@@ -468,6 +468,12 @@ footer{color:var(--muted);font-size:.82rem;max-width:80ch}
       <div class="signals" id="signals"></div>
     </div>
   </section>
+  <section class="panel" id="memPanel" style="display:none">
+    <div class="panel-head"><h3>Memory and lessons</h3><span class="hint" id="memHint"></span></div>
+    <div class="tune" id="memTune"></div>
+    <h3 style="font-size:.95rem;margin-top:10px">Lessons from recent trades</h3>
+    <div class="tune" id="lessons"></div>
+  </section>
   <section class="grid2">
     <div class="panel">
       <div class="panel-head"><h3>Open trades</h3><span class="hint" id="posHint"></span></div>
@@ -710,7 +716,26 @@ function renderLearning() {
       (S.counters.onlyHunter ? ` ${S.counters.onlyHunter} coins were blocked only by the Hunter.` : '') + meta;
   }
 }
+function renderMemory() {
+  const M = S.memory; if (!M) return;
+  $('memPanel').style.display = '';
+  $('memHint').textContent = M.size < M.ready ? `Collecting: ${M.size} of ${M.ready} setups` : `${M.size.toLocaleString()} setups remembered`;
+  const D = M.debate || {}, rows = [];
+  rows.push(`<div class="tune-row"><span>Similar-setup memory ${M.weight > 0 ? `counts ${Math.round(M.weight * 100)}% in the Professor's chance` : M.size < M.ready ? 'starts helping soon' : 'is muted until it proves itself'}</span><b>${M.accuracy == null ? 'not checked yet' : `right ${pctPlain(M.accuracy)} of recent checks`}</b></div>`);
+  rows.push(`<div class="tune-row"><span>Bull vs bear debates</span><b>${D.held || 0} held · bull won ${D.bullWins || 0} · bear won ${D.bearWins || 0} · too close ${D.tooClose || 0}</b></div>`);
+  rows.push(`<div class="tune-row"><span>Risk team (3 voices check the whole portfolio)</span><b>${M.riskTeam ? 'on' : 'off'}</b></div>`);
+  const recs = M.records || [];
+  if (recs.length) {
+    const fmt = (r) => `${esc(r.key)} ${r.wins}/${r.n} ${sgnSol(r.pnl, 2)}${r.resting ? ' (resting)' : ''}`;
+    rows.push(`<div class="tune-row"><span>Best coins</span><b>${recs.slice(0, 3).map(fmt).join(' · ')}</b></div>`);
+    if (recs.length > 3) rows.push(`<div class="tune-row"><span>Worst coins</span><b>${recs.slice(-3).reverse().map(fmt).join(' · ')}</b></div>`);
+  }
+  setHtml('memTune', rows.join(''));
+  const L = M.lessons || [];
+  setHtml('lessons', L.length ? L.map((l) => `<div class="tune-row"><span>${esc(l.text)}</span><b class="${cls(l.pnl)}">${sgnSol(l.pnl, 2)}</b></div>`).join('') : '<div class="tune-row"><span class="muted">Each finished trade writes a lesson here.</span></div>');
+}
 function renderAnalysis() {
+  renderMemory();
   const A = S.analysis; if (!A) return;
   const e = A.edge, box = $('edgeBox');
   if (!e.ready) { box.className = 'verdict-box'; $('edgeTitle').textContent = 'Not enough trades yet'; $('edgeText').textContent = `${e.have} of ${e.need} finished trades needed before this check means anything.`; }

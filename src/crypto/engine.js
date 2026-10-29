@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events';
 import { Learner } from '../learner.js';
 import { signalHealth, bootstrapEdge, tradeMetrics, walkForward, optimizeExits, nextMood } from '../analytics.js';
 import { COINS } from './data.js';
+import { recall, memoryLine, recordTrade, reflect, riskTeam, MEMORY_READY } from './memory.js';
 import { CRYPTO_FEATURES, cryptoFeatures, cryptoVector, cryptoScout, cryptoHunter, cryptoProfessor, shortScout, shortHunter, shortProfessor, guardianSize, guardianTurned } from './agents.js';
 
 const AGENTS = ['scout', 'hunter', 'professor'];
@@ -20,6 +21,7 @@ export const cryptoBrainDefaults = (cfg) => ({
   samples: [], curve: [], labels: 0, paths: [], exitRule: null, exitTune: null, mood: 'normal', recentY: [],
   guardian: { active: true, exits: 0, saved: 0, helped: 0 },
   shortLearner: null, shortThresholds: { scout: 0.5, hunter: 0.45, professor: 0.5 }, shortTeam: { calls: 0, wins: 0 },
+  memory: { checks: 0, right: 0, recent: [] }, coinRecords: {}, lessons: [], debate: { held: 0, bullWins: 0, bearWins: 0, tooClose: 0 },
 });
 
 /**
@@ -52,6 +54,18 @@ export class CryptoEngine extends EventEmitter {
   get L() { return this.ledger.state; }
   get B() { return this.brain.state; }
   get candleMs() { return this.C.candleSec * 1000; }
+
+  /** Similar past setups (memory). */
+  remember(x) { return recall(this.B.samples, x, (v) => this.learner.norm(v), Math.floor(this.learner.n / 300)); }
+  /** How much memory gets to say: a little while unproven, more once it has been right more often than not. */
+  memoryWeight() {
+    const M = this.B.memory, r = M.recent || [];
+    if (this.B.samples.length < MEMORY_READY) return 0;
+    if (r.length < 50) return this.C.memoryWeight / 2;
+    const acc = r.reduce((a, b) => a + b, 0) / r.length;
+    return acc >= 0.52 ? this.C.memoryWeight : 0;
+  }
+  btcNow() { return this.coins.get('BTC-USD')?.live || null; }
 
   rule() {
     const base = { takeProfit: this.C.takeProfit, stopLoss: this.C.stopLoss, trailing: this.C.trailing, trailStart: this.C.trailStart, maxHoldMin: this.C.maxHoldMin };
@@ -202,20 +216,15 @@ export class CryptoEngine extends EventEmitter {
     const h = cryptoHunter(f, coin.product === 'BTC-USD');
     h.vote = h.critical ? 'avoid' : h.score >= this.bar('hunter', h.score) ? 'buy' : 'wait';
     const pr = cryptoProfessor(f, s, h, this.learner, x, this.C.maxAtr);
+    const mem = this.remember(x), mw = this.memoryWeight();
+    if (mem && mw > 0 && !pr.critical) { const brain = pr.score; pr.score = (1 - mw) * brain + mw * mem.longWin; pr.thought = `${Math.round(pr.score * 100)}% chance of profit (brain ${Math.round(brain * 100)}%, ${memoryLine(mem, 'long').toLowerCase()})`; }
     const pb = this.bar('professor', pr.score);
     pr.vote = pr.critical ? 'avoid' : pr.score >= pb ? 'buy' : 'wait';
     if (!pr.critical) pr.thought += ` · needs ${Math.round(pb * 100)}%`;
     const team = s.vote === 'buy' && h.vote === 'buy' && pr.vote === 'buy';
     const nb = (this.L.counters.notBuy ||= { scout: 0, hunter: 0, professor: 0 });
     if (s.vote !== 'buy') nb.scout++; if (h.vote !== 'buy') nb.hunter++; if (pr.vote !== 'buy') nb.professor++;
-    let decision = team ? 'buy' : 'pass', blocked = '';
-    // A "super deal": far above the bars on every count. It may use an extra slot when the normal ones are full.
-    const superDeal = team && pr.score >= Math.max(pb + this.C.superMargin, this.C.superMinProb) && s.score >= this.C.superMinScout;
-    if (team) {
-      blocked = this.canOpen(coin, superDeal);
-      if (!blocked) { const extra = this.L.positions.length + this.opening >= this.C.maxOpen; this.open(coin, f, { s, h, pr, bar: pb }, extra); decision = 'bought'; if (extra) pr.thought = `Super deal: ${pr.thought}`; }
-      else decision = 'blocked';
-    }
+    let decision = 'pass', blocked = '';
     // ---- the short council: same three agents, looking for a fall ----
     let side = 'long', S = null, shortTeam = false;
     if (this.C.shorts) {
@@ -224,20 +233,45 @@ export class CryptoEngine extends EventEmitter {
       const sh = shortHunter(f, coin.product === 'BTC-USD');
       sh.vote = sh.critical ? 'avoid' : sh.score >= this.bar('hunter', sh.score, true) ? 'short' : 'wait';
       const sp = shortProfessor(f, ss, sh, this.shortLearner, x, this.C.maxAtr);
+      if (mem && mw > 0 && !sp.critical && mem.shortWin != null) { const brain = sp.score; sp.score = (1 - mw) * brain + mw * mem.shortWin; sp.thought = `${Math.round(sp.score * 100)}% chance a short profits (brain ${Math.round(brain * 100)}%, ${memoryLine(mem, 'short').toLowerCase()})`; }
       const spb = this.bar('professor', sp.score, true);
       sp.vote = sp.critical ? 'avoid' : sp.score >= spb ? 'short' : 'wait';
       if (!sp.critical) sp.thought += ` · needs ${Math.round(spb * 100)}%`;
       shortTeam = ss.vote === 'short' && sh.vote === 'short' && sp.vote === 'short';
       S = { s: ss, h: sh, pr: sp, bar: spb };
-      if (shortTeam && !team) {
-        const superShort = sp.score >= Math.max(spb + this.C.superMargin, this.C.superMinProb) && ss.score >= this.C.superMinScout;
-        blocked = this.canOpen(coin, superShort);
-        if (!blocked) { const extra = this.L.positions.length + this.opening >= this.C.maxOpen; this.open(coin, f, S, extra, 'short'); decision = 'shorted'; if (extra) sp.thought = `Super deal: ${sp.thought}`; }
-        else decision = 'blocked';
-      }
-      // Show whichever side looks more interesting on the dashboard.
-      if (decision === 'shorted' || (shortTeam && !team) || (!team && ss.score > s.score && decision === 'pass')) side = 'short';
     }
+    // ---- bull vs bear debate: a side only trades if its case clearly beats the other side's ----
+    let goLong = team, goShort = shortTeam;
+    if (S && (team || shortTeam)) {
+      const bull = pr.score, bear = S.pr.score, gap = bull - bear, D = this.B.debate;
+      const line = `Debate: bull ${Math.round(bull * 100)}% vs bear ${Math.round(bear * 100)}%`;
+      D.held++;
+      goLong = team && gap >= this.C.debateMargin;
+      goShort = shortTeam && -gap >= this.C.debateMargin;
+      if (goLong) D.bullWins++; else if (goShort) D.bearWins++; else D.tooClose++;
+      if (team) pr.thought += ` · ${line}${goLong ? ', bull wins' : ', too close'}`;
+      if (shortTeam) S.pr.thought += ` · ${line}${goShort ? ', bear wins' : ', too close'}`;
+      if (!goLong && !goShort) { decision = 'blocked'; blocked = `bull and bear cases too close (${Math.round(bull * 100)}% vs ${Math.round(bear * 100)}%)`; }
+    }
+    // A "super deal": far above the bars on every count. It may use an extra slot when the normal ones are full.
+    const tryOpen = (sd, V, sideName) => {
+      const superDeal = V.pr.score >= Math.max(V.bar + this.C.superMargin, this.C.superMinProb) && V.s.score >= this.C.superMinScout;
+      let why = this.canOpen(coin, superDeal, sideName);
+      let risk = null;
+      if (!why && this.C.riskTeam) {
+        risk = riskTeam({ side: sideName, positions: this.L.positions, dailyPnl: this.L.daily.pnl, dailyLimit: this.C.dailyLossLimit, lastTrades: this.L.trades, mood: this.B.mood, atr: f.atr, maxAtr: this.C.maxAtr, maxSameSide: this.C.maxSameSide });
+        if (risk.mult === 0) why = risk.text;
+      }
+      if (why) return { decision: 'blocked', blocked: why };
+      const extra = this.L.positions.length + this.opening >= this.C.maxOpen;
+      this.open(coin, f, { ...V, mem, risk }, extra, sideName);
+      if (extra) V.pr.thought = `Super deal: ${V.pr.thought}`;
+      return { decision: sideName === 'short' ? 'shorted' : 'bought', blocked: '' };
+    };
+    if (goLong) ({ decision, blocked } = tryOpen(true, { s, h, pr, bar: pb }, 'long'));
+    else if (goShort) ({ decision, blocked } = tryOpen(true, S, 'short'));
+    // Show whichever side looks more interesting on the dashboard.
+    if (S && (decision === 'shorted' || goShort || (shortTeam && !team) || (!team && S.s.score > s.score && decision === 'pass'))) side = 'short';
     const lastT = coin.closed[coin.closed.length - 1].t;
     if (team || shortTeam || lastT - coin.lastShadowT >= 3 * this.candleMs) {
       coin.lastShadowT = lastT;
@@ -262,9 +296,11 @@ export class CryptoEngine extends EventEmitter {
     this.emit('radar', item);
   }
 
-  canOpen(coin, superDeal = false) {
+  canOpen(coin, superDeal = false, side = 'long') {
     if (this.L.paused) return 'paused';
     if (this.L.positions.some((p) => p.mint === coin.product)) return 'already holding it';
+    const rec = this.B.coinRecords[`${coin.symbol} ${side}`];
+    if (rec && rec.restUntil > Date.now()) return `resting ${coin.symbol} ${side === 'short' ? 'shorts' : 'buys'} after ${this.C.coinRestAfter} losses in a row (${Math.ceil((rec.restUntil - Date.now()) / 3_600_000)}h left)`;
     const limit = this.C.maxOpen + (superDeal ? this.C.superSlots : 0);
     if (this.L.positions.length + this.opening >= limit) return superDeal ? 'even the super-deal slot is full' : 'max open positions';
     if (this.L.daily.pnl <= -this.C.dailyLossLimit) return 'daily loss limit reached';
@@ -277,12 +313,14 @@ export class CryptoEngine extends EventEmitter {
     const now = Date.now();
     const bar = v.bar ?? this.bar('professor', v.pr.score, side === 'short');
     const g = this.C.guardian ? guardianSize(this.C.tradeSize, v.pr.score, bar, f.atr, this.L.balance, this.C.guardMinMult, this.C.guardMaxMult) : { size: this.C.tradeSize, mult: 1, why: '' };
-    const cost = g.size;
-    this.lastGuard = `Size $${cost.toFixed(0)} (${g.mult.toFixed(1)}x): ${g.why}`;
+    const rm = v.risk ? v.risk.mult : 1;
+    const cost = +(g.size * rm).toFixed(2);
+    this.lastGuard = `Size $${cost.toFixed(0)} (${(g.mult * rm).toFixed(1)}x): ${g.why}${v.risk ? ` · ${v.risk.text}` : ''}`;
+    const memWin = v.mem ? (side === 'short' ? v.mem.shortWin : v.mem.longWin) : null;
     const p = {
       id: `${now}-${coin.symbol}`, mint: coin.product, symbol: coin.symbol, name: coin.name, openedAt: now,
-      side, lev: this.C.leverage, entryT: coin.closed[coin.closed.length - 1].t, entry: f.price, cost, value: cost, acctRet: 0, peak: 0, peakRet: 0, lastRet: 0, heldSec: 0,
-      thoughts: { scout: v.s.thought, hunter: v.h.thought, professor: v.pr.thought, guardian: this.lastGuard }, sizeMult: +g.mult.toFixed(2),
+      side, lev: this.C.leverage, btcEntry: this.btcNow(), memWin, entryT: coin.closed[coin.closed.length - 1].t, entry: f.price, cost, value: cost, acctRet: 0, peak: 0, peakRet: 0, lastRet: 0, heldSec: 0,
+      thoughts: { scout: v.s.thought, hunter: v.h.thought, professor: v.pr.thought, guardian: this.lastGuard }, sizeMult: +(g.mult * rm).toFixed(2),
     };
     this.L.balance -= cost;
     this.L.positions.push(p);
@@ -305,10 +343,16 @@ export class CryptoEngine extends EventEmitter {
     this.L.positions = this.L.positions.filter((x) => x !== p);
     this.L.trades.unshift(trade); if (this.L.trades.length > 1000) this.L.trades.length = 1000;
     this.L.daily.pnl += trade.pnl;
+    // Reflection: what happened, was memory right, how this coin+side is doing.
+    const side = p.side || 'long', btc = this.btcNow();
+    const { r: rec, rested } = recordTrade(this.B.coinRecords, `${p.symbol} ${side}`, trade.pnl, this.C.coinRestAfter, this.C.coinRestHours * 3_600_000);
+    const lesson = reflect({ symbol: p.symbol, side, ret, reason, btcMove: p.btcEntry && btc ? btc / p.btcEntry - 1 : null, memWin: p.memWin ?? null, rec, rested, restHours: this.C.coinRestHours });
+    trade.lesson = lesson;
+    this.B.lessons.unshift({ at: now, symbol: p.symbol, side, pnl: +trade.pnl.toFixed(2), text: lesson }); if (this.B.lessons.length > 60) this.B.lessons.length = 60;
     const priceTxt = (p.lev || 1) > 1 ? ` (price ${(fillRet * 100).toFixed(2)}% x${p.lev})` : '';
     this.log(`EXIT ${p.side === 'short' ? 'short ' : ''}${p.symbol} ${(ret * 100).toFixed(1)}%${priceTxt} (${reason})`);
     this.emit('exit', trade);
-    this.notifier.send(`${trade.pnl >= 0 ? '✅' : '🔻'} ${p.side === 'short' ? 'Closed short' : 'Sold'} ${p.symbol}: ${(ret * 100).toFixed(1)}%${priceTxt} (${trade.pnl >= 0 ? '+' : ''}$${trade.pnl.toFixed(2)}), ${reason}`);
+    this.notifier.send(`${trade.pnl >= 0 ? '✅' : '🔻'} ${p.side === 'short' ? 'Closed short' : 'Sold'} ${p.symbol}: ${(ret * 100).toFixed(1)}%${priceTxt} (${trade.pnl >= 0 ? '+' : ''}$${trade.pnl.toFixed(2)}), ${reason}\n📝 ${lesson}`);
     this.sampleEquity();
     this.checkBreaker();
     this.ledger.save();
@@ -333,17 +377,21 @@ export class CryptoEngine extends EventEmitter {
     const i = this.shadows.indexOf(s); if (i < 0) return; this.shadows.splice(i, 1);
     const ret = s.done ? s.result : s.path[s.path.length - 1][1];
     const y = ret > 0 ? 1 : 0;
+    // Check memory before it sees this coin's result: would similar past setups have called it right?
+    const m = this.remember(s.x);
+    if (m) { const M = this.B.memory, ok = (m.longWin >= 0.5) === (y === 1) ? 1 : 0; M.checks++; M.right += ok; (M.recent ||= []).push(ok); if (M.recent.length > 200) M.recent.shift(); }
     this.learner.learn(s.x, y);
+    let sret = null;
     if (s.sh) {
-      const sret = s.sh.done ? s.sh.result : this.netSide((s.lastClose ?? s.entry) / s.entry, 'short', s.held || 0);
+      sret = s.sh.done ? s.sh.result : this.netSide((s.lastClose ?? s.entry) / s.entry, 'short', s.held || 0);
       this.shortLearner.learn(s.x, sret > 0 ? 1 : 0);
       if (s.sh.team) { this.B.shortTeam.calls++; if (sret > 0) this.B.shortTeam.wins++; }
     }
     const A = this.B.agents;
     for (const a of AGENTS) { const v = s.votes[a], st = A[a]; if (v === 'buy') { st.calls++; st.buys++; if (y) { st.right++; st.buyWins++; } } else if (v === 'avoid') { st.calls++; if (!y) st.right++; } }
     if (s.team) { A.team.buys++; if (y) A.team.buyWins++; }
-    this.B.samples.push({ p: s.scores.professor, scout: s.scores.scout, hunter: s.scores.hunter, ret: +ret.toFixed(5), x: s.x.map((v) => +v.toFixed(3)) });
-    if (this.B.samples.length > 800) this.B.samples.splice(0, this.B.samples.length - 800);
+    this.B.samples.push({ p: s.scores.professor, scout: s.scores.scout, hunter: s.scores.hunter, ret: +ret.toFixed(5), sret: sret == null ? null : +sret.toFixed(5), x: s.x.map((v) => +v.toFixed(3)) });
+    if (this.B.samples.length > 3000) this.B.samples.splice(0, this.B.samples.length - 3000);
     this.B.paths.push(s.path); if (this.B.paths.length > 450) this.B.paths.splice(0, this.B.paths.length - 450);
     this.B.recentY.push(y); if (this.B.recentY.length > 80) this.B.recentY.shift();
     const prev = this.B.mood;
@@ -446,6 +494,11 @@ export class CryptoEngine extends EventEmitter {
         shortTeam: { calls: this.B.shortTeam.calls, winRate: this.B.shortTeam.calls ? this.B.shortTeam.wins / this.B.shortTeam.calls : null },
       },
       shorts: !!this.C.shorts,
+      memory: (() => {
+        const M = this.B.memory, r = M.recent || [];
+        const recs = Object.entries(this.B.coinRecords).map(([k, v]) => ({ key: k, n: v.n, wins: v.wins, pnl: +v.pnl.toFixed(2), resting: v.restUntil > now })).sort((a, b) => b.pnl - a.pnl);
+        return { size: this.B.samples.length, ready: MEMORY_READY, checks: M.checks, accuracy: r.length ? r.reduce((a, b) => a + b, 0) / r.length : null, weight: this.memoryWeight(), debate: this.B.debate, records: recs, lessons: this.B.lessons.slice(0, 8), riskTeam: !!this.C.riskTeam };
+      })(),
       learning: { samples: this.learner.n, accuracy: this.learner.accuracy(), watching: this.shadows.length },
       counters: { ...this.L.counters, seen: this.L.counters.evaluated, tracked: this.coins.size },
       meta: null,
