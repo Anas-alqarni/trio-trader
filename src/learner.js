@@ -33,10 +33,16 @@ export class Learner {
     this.lr = 0.04;
     this.l2 = 0.002;
   }
+  /**
+   * Standardize each signal. Two guards: a floor on the spread, so a signal that barely changed for a long time
+   * (Fear & Greed moves once a day) isn't blown up when it finally moves; and a cap at ±3, so one unusual
+   * reading can't push the chance to 1% or 99% by itself.
+   */
   norm(x) {
     return x.map((v, i) => {
       const sd = this.n > 1 ? Math.sqrt(this.m2[i] / (this.n - 1)) : 1;
-      return (v - this.mean[i]) / (sd > 1e-9 ? sd : 1);
+      const z = (v - this.mean[i]) / Math.max(sd, 0.1);
+      return Math.max(-3, Math.min(3, z));
     });
   }
   raw(x) {
